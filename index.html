@@ -1618,7 +1618,7 @@ function parseCSV(text) {
   // Auto-detect separator: ING uses semicolons (puntkommagescheiden)
   const firstLine = lines[0];
   const sep = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
-  const header = firstLine.split(sep).map(h => h.replace(/"/g,'').trim().toLowerCase());
+  const header = firstLine.split(sep).map(h => h.replace(/"/g,'').trim().toLowerCase().replace(/\s*\/\s*/g,'/'));
   return lines.slice(1).map(line => {
     const cols = splitCSVLine(line, sep);
     const obj = {};
@@ -1640,11 +1640,13 @@ function splitCSVLine(line, sep=',') {
 
 function ingRow(row, account) {
   const dateRaw   = row['datum'] || '';
-  const naam      = row['naam/omschrijving'] || row['naam'] || row['omschrijving'] || '';
+  // ING uses 'naam / omschrijving' with spaces — normalise all header variants
+  const naam      = row['naam / omschrijving'] || row['naam/omschrijving'] || row['naam'] || row['omschrijving'] || '';
   const meded     = row['mededelingen'] || '';
-  const afbij     = (row['af bij'] || row['afbij'] || '').toLowerCase();
-  const bedragRaw = row['bedrag (eur)'] || row['bedrag'] || '0';
-  const bedrag    = parseFloat(bedragRaw.replace(',', '.')) || 0;
+  const afbij     = (row['af bij'] || row['afbij'] || row['af_bij'] || '').toLowerCase();
+  const bedragRaw = row['bedrag (eur)'] || row['bedrag (euro)'] || row['bedrag'] || '0';
+  // Dutch decimal: '3,00' -> 3.00 (remove thousands dots first, then replace comma)
+  const bedrag    = parseFloat(bedragRaw.replace(/\./g,'').replace(',', '.')) || 0;
   if (!dateRaw || bedrag === 0) return null;
 
   const d = dateRaw.replace(/[^0-9]/g,'');
