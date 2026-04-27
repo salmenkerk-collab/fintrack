@@ -1544,6 +1544,9 @@ const STATE = {
   snapshot: false
 };
 
+// Custom category rules (persisted in localStorage)
+let CUSTOM_RULES = JSON.parse(localStorage.getItem('fintrack_rules') || '[]');
+
 const CATEGORIES = [
   { key:'Housing',       emoji:'🏠', keywords:/huur|rent|hypotheek|mortgage|servicekosten/ },
   { key:'Groceries',     emoji:'🛒', keywords:/albert.heijn|jumbo|lidl|aldi|plus|dirk|boodschap|supermarkt|spar/ },
