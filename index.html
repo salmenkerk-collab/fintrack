@@ -828,7 +828,7 @@ body::before {
   </button>
   <button class="nav-btn" data-view="partner" onclick="nav('partner',this)">
     <div class="nav-dot" style="background:var(--partner)"></div>
-    Partner
+    Charlotte
   </button>
   <button class="nav-btn" data-view="joint" onclick="nav('joint',this)">
     <div class="nav-dot" style="background:var(--joint)"></div>
@@ -862,7 +862,7 @@ body::before {
 <nav class="mobile-nav">
   <button class="mobile-nav-btn active" onclick="nav('household',this)"><span class="icon">⌂</span>Home</button>
   <button class="mobile-nav-btn" onclick="nav('sven',this)"><span class="icon">◈</span>Sven</button>
-  <button class="mobile-nav-btn" onclick="nav('partner',this)"><span class="icon">◉</span>Partner</button>
+  <button class="mobile-nav-btn" onclick="nav('partner',this)"><span class="icon">◉</span>Charlotte</button>
   <button class="mobile-nav-btn" onclick="nav('joint',this)"><span class="icon">⊕</span>Joint</button>
   <button class="mobile-nav-btn" onclick="nav('wealth',this)"><span class="icon">◆</span>Wealth</button>
   <button class="mobile-nav-btn" onclick="nav('fire',this)"><span class="icon">🔥</span>FIRE</button>
@@ -1019,7 +1019,7 @@ body::before {
 <div class="view" id="view-partner">
   <div class="page-head">
     <div>
-      <h1>Partner</h1>
+      <h1>Charlotte</h1>
       <div class="sub">Personal account</div>
     </div>
     <div class="page-actions">
@@ -1110,7 +1110,7 @@ body::before {
       </div>
       <div class="split-vals">
         <span class="split-val" style="color:var(--sven)" id="jt-sven-share">Sven €0</span>
-        <span class="split-val" style="color:var(--partner)" id="jt-partner-share">Partner €0</span>
+        <span class="split-val" style="color:var(--partner)" id="jt-partner-share">Charlotte €0</span>
       </div>
     </div>
   </div>
@@ -1175,7 +1175,7 @@ body::before {
       </div>
       <div class="asset-row">
         <div class="asset-icon">🔵</div>
-        <div class="asset-info"><div class="asset-name">Partner — ING</div><div class="asset-sub">Personal account</div></div>
+        <div class="asset-info"><div class="asset-name">Charlotte — ING</div><div class="asset-sub">Personal account</div></div>
         <input class="wealth-input" id="w-cash-partner" type="number" placeholder="0" oninput="calcWealth()" value="">
       </div>
       <div class="asset-row">
@@ -1386,7 +1386,7 @@ body::before {
       <input type="file" accept=".csv" onchange="handleCSV(event,'partner')">
       <div class="upload-card-top">
         <span class="upload-icon">↑</span>
-        <span class="upload-name" style="color:var(--partner)">Partner</span>
+        <span class="upload-name" style="color:var(--partner)">Charlotte</span>
       </div>
       <div class="upload-hint">Personal ING account</div>
       <div class="upload-status" id="status-partner">No file loaded</div>
@@ -1498,7 +1498,7 @@ const CATEGORIES = [
   { key:'Shopping',      emoji:'🛍', keywords:/zalando|bol\.com|amazon|h&m|zara|primark|ikea|hema|action|coolblue|mediamarkt/ },
   { key:'Savings',       emoji:'💰', keywords:/spaar|pensioen|asr |nn |aegon|robeco|degiro|trade.republic|investing/ },
   { key:'Transfer',      emoji:'🔄', keywords:/eigen rekening|spaarrekening|overboeking|betaalrekening|sven|partner/ },
-  { key:'Income',        emoji:'💼', keywords:// },
+  { key:'Income',        emoji:'💼', keywords:/salaris|loon|salary|wages|bonus|dividend|rente/ },
 ];
 
 // ═══════════════════════════════════════════════════════
@@ -1811,7 +1811,7 @@ function renderJoint() {
   bufEl.textContent = (buffer>=0?'+':'')+eurFull(buffer);
   bufEl.className = `kpi-val ${buffer>=0?'green':'red'}`;
   setText('jt-sven-share',    `Sven ${eurFull(each)}`);
-  setText('jt-partner-share', `Partner ${eurFull(each)}`);
+  setText('jt-partner-share', `Charlotte ${eurFull(each)}`);
 
   renderAccountTx('joint', '');
   const expTx = tx.filter(t => t.amount < 0 && !t.isTransfer);
