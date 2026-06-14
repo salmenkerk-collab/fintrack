@@ -420,8 +420,10 @@ function migrate(d){
     if (a.category === 'crypto')
       return { ...a, coinId: a.coinId || coinIdFromName(a.name),
         quantity: (a.quantity != null ? a.quantity : null),
-        priceEUR: (a.priceEUR != null ? a.priceEUR : null) };
-    if (a.category === 'stocks') return { ...a, isin: a.isin || null };
+        priceEUR: (a.priceEUR != null ? a.priceEUR : null),
+        costBasis: (a.costBasis != null ? a.costBasis : null) };
+    if (a.category === 'stocks') return { ...a, isin: a.isin || null,
+        costBasis: (a.costBasis != null ? a.costBasis : null) };
     return a;
   });
   return d;
@@ -1446,8 +1448,9 @@ function BudgetTab({ data, setData }){
 }
 
 /* ============================ TAB 4 — Portfolio ============================ */
-function PortfolioTab({ data }){
+function PortfolioTab({ data, setData }){
   const assets = data.assets;
+  const setCost = (id, v) => setData({ ...data, assets: data.assets.map(a => a.id === id ? { ...a, costBasis: v } : a) });
   const stocks = assets.filter(a => a.category === 'stocks');
   const crypto = assets.filter(a => a.category === 'crypto');
   const sum = arr => arr.reduce((s,a) => s + a.value, 0);
@@ -1474,6 +1477,12 @@ function PortfolioTab({ data }){
 
   const positions = [...stocks, ...crypto].sort((a,b) => b.value - a.value);
   const catTotal = a => a.category === 'stocks' ? stocksTotal : cryptoTotal;
+
+  const withCost = positions.filter(a => a.costBasis);
+  const invested = withCost.reduce((s,a) => s + a.costBasis, 0);
+  const curOfThose = withCost.reduce((s,a) => s + a.value, 0);
+  const gainTotal = curOfThose - invested;
+  const gainPct = invested > 0 ? gainTotal / invested * 100 : 0;
 
   const BrokerCard = ({ title, total, count, unit }) => (
     <div className="card">
@@ -1534,11 +1543,23 @@ function PortfolioTab({ data }){
         </div>
       </div>
 
+      {withCost.length > 0 && (
+        <div className="grid3">
+          <div className="card"><h3>Invested (cost basis)</h3><div className="metric">{fmt0(invested)}</div>
+            <div className="sub">{withCost.length} of {positions.length} positions tracked</div></div>
+          <div className="card"><h3>Current value</h3><div className="metric">{fmt0(curOfThose)}</div>
+            <div className="sub">of those tracked positions</div></div>
+          <div className="card"><h3>Unrealised gain</h3>
+            <div className={'metric ' + (gainTotal >= 0 ? 'green' : 'red')}>{(gainTotal >= 0 ? '+' : '') + fmt0(gainTotal)}</div>
+            <div className={'sub ' + (gainTotal >= 0 ? 'green' : 'red')}>{(gainTotal >= 0 ? '+' : '') + pct1(gainPct)}</div></div>
+        </div>
+      )}
+
       <div className="card">
-        <h2>Positions</h2>
+        <h2>Positions <span className="muted small">· set a cost basis to track gain</span></h2>
         <table>
           <thead>
-            <tr><th>Name</th><th>Broker</th><th className="r">Value</th><th className="r">% of category</th><th>Notes</th></tr>
+            <tr><th>Name</th><th>Broker</th><th className="r">Value</th><th className="r">Cost basis</th><th className="r">Gain</th><th className="r">% cat</th><th>Notes</th></tr>
           </thead>
           <tbody>
             {positions.map(a => (
@@ -1546,6 +1567,19 @@ function PortfolioTab({ data }){
                 <td style={{fontWeight:600}}>{a.name}</td>
                 <td className="muted">{instName(data, a.institutionId)}</td>
                 <td className="r num" style={{fontWeight:700}}>{fmt(a.value)}</td>
+                <td className="r">
+                  {a.costBasis
+                    ? <NumInput value={a.costBasis} step={1} width={86} onChange={v => setCost(a.id, v)}/>
+                    : <button className="btn" style={{padding:'2px 8px', fontSize:12}} onClick={() => setCost(a.id, Math.round(a.value))}>set</button>}
+                </td>
+                <td className="r num">
+                  {a.costBasis
+                    ? <span className={a.value - a.costBasis >= 0 ? 'green' : 'red'}>
+                        {(a.value - a.costBasis >= 0 ? '+' : '') + fmt0(a.value - a.costBasis)}
+                        <span className="small"> ({(a.value - a.costBasis >= 0 ? '+' : '') + pct1(a.costBasis > 0 ? (a.value - a.costBasis)/a.costBasis*100 : 0)})</span>
+                      </span>
+                    : <span className="dim">—</span>}
+                </td>
                 <td className="r num muted">{pct1(catTotal(a) ? a.value/catTotal(a)*100 : 0)}</td>
                 <td>
                   {concentrated.has(a.id) && <span className="badge" style={{background:'rgba(251,191,36,.15)', color:'var(--yellow)'}}>Concentrated</span>}
@@ -2979,17 +3013,17 @@ function BrokerImportModal({ data, onClose, onCommit }){
     let updated = 0, added = 0;
     rows.forEach(r => {
       if (r.mapTo === '__skip__') return;
-      const patch = { value:r.value, isin:null, lastUpdated:ISO(TODAY) };
-      if (mode === 'transaction') patch.quantity = r.shares;
+      const cost = (mode === 'transaction' && r.cost > 0) ? Math.round(r.cost*100)/100 : null;
       if (r.mapTo === '__new__'){
         assets.push({ id:uid(), name:r.product, note:(broker === 'trade-republic' ? 'Trade Republic' : 'DEGIRO'),
           value:r.value, category:'stocks', institutionId:broker, isin:r.isin || null,
-          quantity:(mode === 'transaction' ? r.shares : null), lastUpdated:ISO(TODAY) });
+          quantity:(mode === 'transaction' ? r.shares : null), costBasis:cost, lastUpdated:ISO(TODAY) });
         added++;
       } else {
         assets = assets.map(a => a.id === r.mapTo
           ? { ...a, value:r.value, isin:(a.isin || r.isin || null),
-              quantity:(mode === 'transaction' ? r.shares : a.quantity), lastUpdated:ISO(TODAY) } : a);
+              quantity:(mode === 'transaction' ? r.shares : a.quantity),
+              costBasis:(cost != null ? cost : a.costBasis), lastUpdated:ISO(TODAY) } : a);
         updated++;
       }
     });
@@ -3224,7 +3258,7 @@ function FinanceModel(){
         {tab === 'networth' && <NetWorthTab data={data} setData={setData}/>}
         {tab === 'fire'     && <FireTab data={data} setData={setData}/>}
         {tab === 'budget'   && <BudgetTab data={data} setData={setData}/>}
-        {tab === 'portfolio'&& <PortfolioTab data={data}/>}
+        {tab === 'portfolio'&& <PortfolioTab data={data} setData={setData}/>}
         {tab === 'property' && <PropertyTab data={data} setData={setData}/>}
         {tab === 'history'  && <HistoryTab data={data} setData={setData}/>}
         {tab === 'settings' && <SettingsTab data={data} setData={setData}/>}
