@@ -2907,9 +2907,9 @@ function SettingsTab({ data, setData }){
 /* ============================ Broker portfolio CSV import (DEGIRO + Trade Republic) ============================ */
 function BrokerImportModal({ data, onClose, onCommit }){
   const fileRef = useRef(null);
-  const [broker, setBroker] = useState('degiro');     // 'degiro' (portfolio CSV) | 'trade-republic' (transaction CSV)
+  const [broker, setBroker] = useState('degiro');     // 'degiro' (portfolio) | 'degiro-tx' (transactions/cost) | 'trade-republic'
   const [rows, setRows] = useState(null);
-  const [mode, setMode] = useState(null);             // 'portfolio' | 'transaction'
+  const [mode, setMode] = useState(null);             // 'portfolio' | 'transaction' | 'degirocost'
   const [err, setErr] = useState(null);
   const stockAssets = data.assets.filter(a => a.category === 'stocks');
 
@@ -2988,17 +2988,51 @@ function BrokerImportModal({ data, onClose, onCommit }){
     }).filter(r => r.shares > 0.000001);
   };
 
+  /* DEGIRO: transaction history -> average cost basis (EUR) for the shares still held. */
+  const parseDegiroCost = parsed => {
+    const get = fieldGetter(parsed[0]);
+    const groups = {};
+    parsed.slice(1).forEach(r => {
+      const name = get(r, ['product','naam','name','productnaam']);
+      const isin = get(r, ['isin','symbool/isin','symboolisin']);
+      if (!name && !isin) return;
+      const sh = signedNum(get(r, ['aantal','quantity','shares','amount']));
+      if (!sh) return;                                          // skip cash/dividend/fee rows
+      let eur = parseDutchAmount(get(r, ['waarde','value','totaal','total']));
+      eur = isNaN(eur) ? 0 : Math.abs(eur);                     // EUR value of the trade
+      const key = (isin || name).toUpperCase();
+      if (!groups[key]) groups[key] = { name, isin, shares:0, buyShares:0, buyCost:0 };
+      const g = groups[key];
+      g.shares += sh;
+      if (sh > 0){ g.buyShares += sh; g.buyCost += eur; }       // money spent buying
+      if (!g.name && name) g.name = name;
+      if (!g.isin && isin) g.isin = isin;
+    });
+    return Object.keys(groups).map(k => {
+      const g = groups[k];
+      const shares = Math.round(g.shares * 1e6) / 1e6;
+      const avg = g.buyShares > 0 ? g.buyCost / g.buyShares : 0;     // avg EUR cost / share
+      const cost = Math.round(avg * Math.max(shares, 0) * 100) / 100;
+      return { key:uid(), product:g.name || k, isin:g.isin || '', shares,
+        cost, value:null, lastRate:null, mapTo: matchAsset(g.name, g.isin) || '__new__' };
+    }).filter(r => r.shares > 0.000001);
+  };
+
   const onFile = e => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     readFileSmart(f).then(text => {
       const parsed = parseCSV(text).rows;
       if (parsed.length < 2){ setErr('No rows found in this CSV.'); return; }
-      const m = broker === 'trade-republic' ? 'transaction' : 'portfolio';
-      const out = m === 'portfolio' ? parsePortfolio(parsed) : parseTransactions(parsed);
+      const m = broker === 'trade-republic' ? 'transaction' : broker === 'degiro-tx' ? 'degirocost' : 'portfolio';
+      const out = m === 'portfolio' ? parsePortfolio(parsed)
+                : m === 'degirocost' ? parseDegiroCost(parsed)
+                : parseTransactions(parsed);
       if (!out.length){
         setErr(m === 'portfolio'
           ? 'No value column found. A DEGIRO Portfolio export has a "Waarde in EUR" / "Value in EUR" column — make sure you exported Portfolio, not transactions.'
+          : m === 'degirocost'
+          ? 'No share transactions found. Use the DEGIRO Transactions export (Activity → Transactions → Export), which lists each individual buy and sell.'
           : 'No share transactions found. In Trade Republic use Profile → Account Statements → Transaction Export, then pick that CSV here.');
         return;
       }
@@ -3010,26 +3044,31 @@ function BrokerImportModal({ data, onClose, onCommit }){
 
   const commit = () => {
     let assets = [...data.assets];
+    const institutionId = broker.indexOf('degiro') === 0 ? 'degiro' : 'trade-republic';
+    const tag = institutionId === 'trade-republic' ? 'Trade Republic' : 'DEGIRO';
+    const setsValue = mode !== 'degirocost';            // cost-only import leaves value alone
+    const setsQty = mode !== 'portfolio';
     let updated = 0, added = 0;
     rows.forEach(r => {
       if (r.mapTo === '__skip__') return;
-      const cost = (mode === 'transaction' && r.cost > 0) ? Math.round(r.cost*100)/100 : null;
+      const cost = ((mode === 'transaction' || mode === 'degirocost') && r.cost > 0) ? Math.round(r.cost*100)/100 : null;
       if (r.mapTo === '__new__'){
-        assets.push({ id:uid(), name:r.product, note:(broker === 'trade-republic' ? 'Trade Republic' : 'DEGIRO'),
-          value:r.value, category:'stocks', institutionId:broker, isin:r.isin || null,
-          quantity:(mode === 'transaction' ? r.shares : null), costBasis:cost, lastUpdated:ISO(TODAY) });
+        assets.push({ id:uid(), name:r.product, note:tag,
+          value:(setsValue ? r.value : (r.cost || 0)), category:'stocks', institutionId, isin:r.isin || null,
+          quantity:(setsQty ? r.shares : null), costBasis:cost, lastUpdated:ISO(TODAY) });
         added++;
       } else {
         assets = assets.map(a => a.id === r.mapTo
-          ? { ...a, value:r.value, isin:(a.isin || r.isin || null),
-              quantity:(mode === 'transaction' ? r.shares : a.quantity),
+          ? { ...a, value:(setsValue ? r.value : a.value), isin:(a.isin || r.isin || null),
+              quantity:(setsQty ? r.shares : a.quantity),
               costBasis:(cost != null ? cost : a.costBasis), lastUpdated:ISO(TODAY) } : a);
         updated++;
       }
     });
-    const tag = broker === 'trade-republic' ? 'Trade Republic' : 'DEGIRO';
-    onCommit(assets, tag + ' import: updated ' + updated + ', added ' + added + ' position' + (added === 1 ? '' : 's') +
-      (mode === 'transaction' ? ' · values estimated from last trade price' : '') + '.');
+    onCommit(assets, tag + (mode === 'degirocost' ? ' cost-basis import' : ' import') + ': updated ' + updated +
+      ', added ' + added + ' position' + (added === 1 ? '' : 's') +
+      (mode === 'transaction' ? ' · values estimated from last trade price'
+        : mode === 'degirocost' ? ' · current values left as-is' : '') + '.');
   };
 
   const nMatch = rows ? rows.filter(r => r.mapTo !== '__skip__' && r.mapTo !== '__new__').length : 0;
@@ -3049,7 +3088,8 @@ function BrokerImportModal({ data, onClose, onCommit }){
             <div className="row" style={{gap:8, flexWrap:'wrap'}}>
               <label className="row small muted" style={{gap:6}}>Broker:
                 <select value={broker} onChange={e => { setBroker(e.target.value); setErr(null); }}>
-                  <option value="degiro">DEGIRO — Portfolio export</option>
+                  <option value="degiro">DEGIRO — Portfolio export (current values)</option>
+                  <option value="degiro-tx">DEGIRO — Transactions export (cost basis)</option>
                   <option value="trade-republic">Trade Republic — Transaction export</option>
                 </select>
               </label>
@@ -3057,6 +3097,8 @@ function BrokerImportModal({ data, onClose, onCommit }){
             <div className="card" style={{background:'var(--bg)', borderStyle:'dashed', textAlign:'center', padding:'24px'}}>
               {broker === 'degiro'
                 ? <div className="mb small muted">DEGIRO: <b>Portfolio → Export → Portfolio</b>. Values arrive in EUR, so every position updates at once.</div>
+                : broker === 'degiro-tx'
+                ? <div className="mb small muted">DEGIRO: <b>Activity → Transactions → Export</b>. The app reads every buy and sell and computes your average cost basis in EUR. Current values are left untouched — use the Portfolio export for those.</div>
                 : <div className="mb small muted">Trade Republic: <b>Profile → Account Statements → Transaction Export → Create</b>. This is a transaction history — the app sums your net shares and estimates value from your last trade price.</div>}
               <button className="btn btn-blue" onClick={() => fileRef.current && fileRef.current.click()}>Choose CSV…</button>
               <input ref={fileRef} type="file" accept=".csv,text/csv" style={{display:'none'}} onChange={onFile}/>
@@ -3070,6 +3112,8 @@ function BrokerImportModal({ data, onClose, onCommit }){
             <div className="small muted">
               {mode === 'transaction'
                 ? 'Reconstructed from your Trade Republic transactions. Value = net shares × your last trade price (an estimate — adjust on the Holdings list after importing).'
+                : mode === 'degirocost'
+                ? 'Average cost basis (EUR) computed from your DEGIRO transactions. Applying this fills cost basis and gain — your current values stay exactly as they are.'
                 : 'Matched to existing holdings by ISIN or name. Check the matches, then apply.'}
             </div>
             <div className="review-wrap">
@@ -3077,6 +3121,8 @@ function BrokerImportModal({ data, onClose, onCommit }){
                 <thead>
                   {mode === 'transaction'
                     ? <tr><th>Position</th><th className="r">Net shares</th><th className="r">Last price</th><th className="r">Est. value</th><th>Maps to holding</th></tr>
+                    : mode === 'degirocost'
+                    ? <tr><th>Position</th><th className="r">Net shares</th><th className="r">Cost basis (EUR)</th><th>Maps to holding</th></tr>
                     : <tr><th>DEGIRO product</th><th className="r">Qty</th><th className="r">Value (EUR)</th><th>Maps to holding</th></tr>}
                 </thead>
                 <tbody>
@@ -3088,6 +3134,11 @@ function BrokerImportModal({ data, onClose, onCommit }){
                             <td className="r num">{(+r.shares).toLocaleString('nl-NL',{maximumFractionDigits:4})}</td>
                             <td className="r num muted">{r.lastRate ? fmt(r.lastRate) : '—'}</td>
                             <td className="r num" style={{fontWeight:700}}>{fmt(r.value)}</td>
+                          </React.Fragment>
+                        : mode === 'degirocost'
+                        ? <React.Fragment>
+                            <td className="r num">{(+r.shares).toLocaleString('nl-NL',{maximumFractionDigits:4})}</td>
+                            <td className="r num" style={{fontWeight:700}}>{r.cost ? fmt(r.cost) : '—'}</td>
                           </React.Fragment>
                         : <React.Fragment>
                             <td className="r num">{r.shares == null ? '—' : (+r.shares).toLocaleString('nl-NL',{maximumFractionDigits:4})}</td>
