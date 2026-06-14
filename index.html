@@ -568,9 +568,9 @@ function NetWorthTab({ data, setData }){
       });
       setData({ ...data, assets: next });
       flash('Updated ' + priced + ' crypto position' + (priced === 1 ? '' : 's') +
-        (boot ? ' \u00b7 derived quantities for ' + boot + ' from current value' : '') + '.');
+        (boot ? ' · derived quantities for ' + boot + ' from current value' : '') + '.');
       setPricing(false);
-    }).catch(err => { flash('Price fetch failed: ' + err.message + ' \u2014 values unchanged.'); setPricing(false); });
+    }).catch(err => { flash('Price fetch failed: ' + err.message + ' — values unchanged.'); setPricing(false); });
   };
   const updateLiab = (id, v) => setData({ ...data,
     liabilities: liabs.map(l => l.id === id ? { ...l, value:v, lastUpdated:ISO(TODAY) } : l),
@@ -637,8 +637,8 @@ function NetWorthTab({ data, setData }){
               <h2 style={{margin:0}}>Holdings</h2>
               <div className="row" style={{gap:8, flexWrap:'wrap'}}>
                 <button className="btn" onClick={refreshCrypto} disabled={pricing} title="Fetch live EUR prices from CoinGecko">
-                  {pricing ? '\u2026 pricing' : '\u21bb Refresh crypto'}</button>
-                <button className="btn" onClick={() => setShowDegiro(true)} title="Update stock values from a DEGIRO portfolio or Trade Republic transaction export">\ud83d\udce5 DEGIRO CSV</button>
+                  {pricing ? '… pricing' : '↻ Refresh crypto'}</button>
+                <button className="btn" onClick={() => setShowDegiro(true)} title="Update stock values from a DEGIRO portfolio or Trade Republic transaction export">📥 Import CSV</button>
                 <button className="btn btn-blue" onClick={() => setAdding(!adding)}>{adding ? 'Close' : '+ Add asset'}</button>
               </div>
             </div>
@@ -662,7 +662,7 @@ function NetWorthTab({ data, setData }){
                 {form.category === 'crypto' && (
                   <label className="fld">Coin (for live pricing)
                     <select value={form.coinId || ''} onChange={e => setForm({...form, coinId:e.target.value})}>
-                      <option value="">\u2014 none \u2014</option>
+                      <option value="">— none —</option>
                       {COIN_LIST.map(t => <option key={t} value={COIN_IDS[t]}>{t}</option>)}
                     </select></label>
                 )}
@@ -692,7 +692,7 @@ function NetWorthTab({ data, setData }){
                               <td>
                                 <span className="row" style={{gap:4}}>
                                   <select value={edit.coinId || ''} onChange={e => setEdit({...edit, coinId:e.target.value})} style={{maxWidth:84}}>
-                                    <option value="">coin\u2026</option>
+                                    <option value="">coin…</option>
                                     {COIN_LIST.map(t => <option key={t} value={COIN_IDS[t]}>{t}</option>)}
                                   </select>
                                   <input type="number" step="any" placeholder="qty" style={{width:84}}
@@ -702,8 +702,8 @@ function NetWorthTab({ data, setData }){
                               </td>
                               <td className="r"><input type="number" style={{width:100}} value={edit.value} onChange={e => setEdit({...edit, value:e.target.value})}/></td>
                               <td className="r" style={{whiteSpace:'nowrap'}}>
-                                <button className="btn-icon" title="Save" onClick={commitEdit}>\u2705</button>
-                                <button className="btn-icon" title="Cancel" onClick={() => setEditingId(null)}>\u2716\ufe0f</button>
+                                <button className="btn-icon" title="Save" onClick={commitEdit}>✅</button>
+                                <button className="btn-icon" title="Cancel" onClick={() => setEditingId(null)}>✖️</button>
                               </td>
                             </tr>
                           ) : (
@@ -712,8 +712,8 @@ function NetWorthTab({ data, setData }){
                               <td><input style={{width:'95%'}} value={edit.note} onChange={e => setEdit({...edit, note:e.target.value})}/></td>
                               <td className="r"><input type="number" style={{width:100}} value={edit.value} onChange={e => setEdit({...edit, value:e.target.value})}/></td>
                               <td className="r" style={{whiteSpace:'nowrap'}}>
-                                <button className="btn-icon" title="Save" onClick={commitEdit}>\u2705</button>
-                                <button className="btn-icon" title="Cancel" onClick={() => setEditingId(null)}>\u2716\ufe0f</button>
+                                <button className="btn-icon" title="Save" onClick={commitEdit}>✅</button>
+                                <button className="btn-icon" title="Cancel" onClick={() => setEditingId(null)}>✖️</button>
                               </td>
                             </tr>
                           )
@@ -723,13 +723,13 @@ function NetWorthTab({ data, setData }){
                             <td className="muted small">
                               {a.note}
                               {a.category === 'crypto' && a.quantity != null &&
-                                <span> \u00b7 {(+a.quantity).toLocaleString('nl-NL',{maximumFractionDigits:6})} {tickerFromName(a.name)}{a.priceEUR ? (' @ ' + fmt(a.priceEUR)) : ''}</span>}
+                                <span> · {(+a.quantity).toLocaleString('nl-NL',{maximumFractionDigits:6})} {tickerFromName(a.name)}{a.priceEUR ? (' @ ' + fmt(a.priceEUR)) : ''}</span>}
                               <span style={{marginLeft:6}}>{relTime(a.lastUpdated)}</span>
                             </td>
                             <td className="r num" style={{fontWeight:700}}>{fmt(a.value)}</td>
                             <td className="r" style={{whiteSpace:'nowrap'}}>
-                              <button className="btn-icon" title="Edit" onClick={() => startEdit(a)}>\u270f\ufe0f</button>
-                              <button className="btn-icon" title="Delete" onClick={() => removeAsset(a.id)}>\ud83d\uddd1</button>
+                              <button className="btn-icon" title="Edit" onClick={() => startEdit(a)}>✏️</button>
+                              <button className="btn-icon" title="Delete" onClick={() => removeAsset(a.id)}>🗑</button>
                             </td>
                           </tr>
                         ))}
@@ -1074,7 +1074,17 @@ function BudgetTab({ data, setData }){
   const [lastImport, setLastImport] = useState(null);
   const toastTimer = useRef(null);
 
-  const mk = monthKey();
+  const curMonth = monthKey();
+  const [mk, setMk] = useState(curMonth);
+  const dataMonths = [...new Set((data.transactions || []).map(t => t.date.slice(0,7)))];
+  const allMonths = [...new Set([curMonth, mk].concat(dataMonths))].sort().reverse();
+  const shiftMonth = delta => {
+    const p = mk.split('-').map(Number);
+    const d = new Date(p[0], p[1] - 1 + delta, 1);
+    const nk = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    if (nk > curMonth) return;            // don't budget into the future
+    setMk(nk);
+  };
   const cats = budgetCats(data);
   const varCats = cats.filter(c => c.type === 'variable');
   const income = data.income;
@@ -1097,7 +1107,8 @@ function BudgetTab({ data, setData }){
 
   const addVar = () => {
     if (!vForm.name || !vForm.amount) return;
-    const tx = { id:uid(), date:ISO(TODAY), description:vForm.name,
+    const date = (mk === curMonth) ? ISO(TODAY) : mk + '-15';
+    const tx = { id:uid(), date:date, description:vForm.name,
       amount:-Math.abs(parseFloat(vForm.amount) || 0), account:'sven',
       categoryId:vForm.categoryId, source:'manual', hash:null, isTransfer:false };
     setData({ ...data, transactions:[...(data.transactions||[]), tx] });
@@ -1158,6 +1169,26 @@ function BudgetTab({ data, setData }){
   return (
     <div className="stack">
       {toast && <div className="toast">{toast}</div>}
+
+      <div className="card" style={{paddingTop:12, paddingBottom:12}}>
+        <div className="spread" style={{flexWrap:'wrap', gap:10}}>
+          <div className="row" style={{gap:8, alignItems:'center'}}>
+            <button className="btn" onClick={() => shiftMonth(-1)} title="Previous month">◀</button>
+            <select value={mk} onChange={e => setMk(e.target.value)} style={{fontWeight:700, fontSize:15, minWidth:170}}>
+              {allMonths.map(m => <option key={m} value={m}>{monthLabel(m)}{m === curMonth ? ' · this month' : ''}</option>)}
+            </select>
+            <button className="btn" onClick={() => shiftMonth(1)} disabled={mk >= curMonth} title="Next month">▶</button>
+            {mk !== curMonth && <button className="btn" onClick={() => setMk(curMonth)}>Jump to this month</button>}
+          </div>
+          <span className="small muted">
+            {monthExpenses.length > 0
+              ? (monthExpenses.length + ' transaction' + (monthExpenses.length === 1 ? '' : 's') + ' · ' + fmt(totalVar) + ' variable')
+              : 'No data for this month yet — import a CSV or log expenses below'}
+          </span>
+        </div>
+        {mk !== curMonth &&
+          <div className="sub" style={{marginTop:8}}>Viewing a past month. Expenses you log here are dated in {monthLabel(mk)}.</div>}
+      </div>
 
       <div className="card">
         <h2>Income — {monthLabel(mk)}</h2>
@@ -2885,7 +2916,7 @@ function BrokerImportModal({ data, onClose, onCommit }){
       if (!out.length){
         setErr(m === 'portfolio'
           ? 'No value column found. A DEGIRO Portfolio export has a "Waarde in EUR" / "Value in EUR" column — make sure you exported Portfolio, not transactions.'
-          : 'No share transactions found. In Trade Republic use Profile \u2192 Account Statements \u2192 Transaction Export, then pick that CSV here.');
+          : 'No share transactions found. In Trade Republic use Profile → Account Statements → Transaction Export, then pick that CSV here.');
         return;
       }
       setErr(null); setMode(m); setRows(out); e.target.value = '';
@@ -2915,7 +2946,7 @@ function BrokerImportModal({ data, onClose, onCommit }){
     });
     const tag = broker === 'trade-republic' ? 'Trade Republic' : 'DEGIRO';
     onCommit(assets, tag + ' import: updated ' + updated + ', added ' + added + ' position' + (added === 1 ? '' : 's') +
-      (mode === 'transaction' ? ' \u00b7 values estimated from last trade price' : '') + '.');
+      (mode === 'transaction' ? ' · values estimated from last trade price' : '') + '.');
   };
 
   const nMatch = rows ? rows.filter(r => r.mapTo !== '__skip__' && r.mapTo !== '__new__').length : 0;
