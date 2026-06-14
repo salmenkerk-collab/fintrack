@@ -249,6 +249,26 @@ const ASSET_CATS = [
 ];
 const catById = id => ASSET_CATS.find(c => c.id === id) || ASSET_CATS[0];
 
+/* ---- CoinGecko live crypto pricing (free, no key, EUR-native, CORS-enabled) ---- */
+const COIN_IDS = { BTC:'bitcoin', ETH:'ethereum', XRP:'ripple', SOL:'solana',
+  ADA:'cardano', VET:'vechain', MANA:'decentraland', SUI:'sui', DOT:'polkadot',
+  DOGE:'dogecoin', LINK:'chainlink', MATIC:'matic-network', AVAX:'avalanche-2',
+  LTC:'litecoin', BNB:'binancecoin', USDT:'tether', USDC:'usd-coin', TRX:'tron',
+  ATOM:'cosmos', NEAR:'near', ALGO:'algorand', XLM:'stellar' };
+const COIN_LIST = Object.keys(COIN_IDS);
+function tickerFromName(name){
+  const m = String(name||'').match(/\(([A-Za-z0-9]+)\)/);
+  if (m) return m[1].toUpperCase();
+  const w = String(name||'').trim().toUpperCase();
+  return COIN_IDS[w] ? w : '';
+}
+function coinIdFromName(name){ const t = tickerFromName(name); return COIN_IDS[t] || null; }
+function fetchCryptoPrices(ids){
+  const u = 'https://api.coingecko.com/api/v3/simple/price?ids=' +
+    encodeURIComponent(ids.join(',')) + '&vs_currencies=eur';
+  return fetch(u).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+}
+
 const SEED_INSTITUTIONS = [
   { id:'degiro',         name:'DEGIRO',         type:'broker' },
   { id:'trade-republic', name:'Trade Republic', type:'broker' },
@@ -396,6 +416,14 @@ function migrate(d){
     }));
     delete d.budgetVariable;
   }
+  d.assets = (d.assets || []).map(a => {
+    if (a.category === 'crypto')
+      return { ...a, coinId: a.coinId || coinIdFromName(a.name),
+        quantity: (a.quantity != null ? a.quantity : null),
+        priceEUR: (a.priceEUR != null ? a.priceEUR : null) };
+    if (a.category === 'stocks') return { ...a, isin: a.isin || null };
+    return a;
+  });
   return d;
 }
 
@@ -460,7 +488,12 @@ function NetWorthTab({ data, setData }){
   const [editingId, setEditingId] = useState(null);
   const [edit, setEdit] = useState({});
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ name:'', note:'', value:'', category:'stocks', institutionId:'degiro' });
+  const [form, setForm] = useState({ name:'', note:'', value:'', category:'stocks', institutionId:'degiro', coinId:'' });
+  const [toast, setToast] = useState(null);
+  const [pricing, setPricing] = useState(false);
+  const [showDegiro, setShowDegiro] = useState(false);
+  const toastT = useRef(null);
+  const flash = m => { setToast(m); if (toastT.current) clearTimeout(toastT.current); toastT.current = setTimeout(() => setToast(null), 6500); };
 
   const assets = data.assets, liabs = data.liabilities;
   const sumCat = c => assets.filter(a => a.category === c).reduce((s,a) => s + a.value, 0);
@@ -489,20 +522,55 @@ function NetWorthTab({ data, setData }){
 
   const save = next => setData({ ...data, assets: next });
 
-  const startEdit = a => { setEditingId(a.id); setEdit({ ...a }); };
+  const startEdit = a => { setEditingId(a.id); setEdit({ ...a, quantity: a.quantity != null ? a.quantity : '' }); };
   const commitEdit = () => {
-    save(assets.map(a => a.id === editingId
-      ? { ...edit, value: parseFloat(edit.value) || 0, lastUpdated: ISO(TODAY) } : a));
+    save(assets.map(a => {
+      if (a.id !== editingId) return a;
+      let v = parseFloat(edit.value) || 0;
+      let q = a.quantity, coinId = a.coinId;
+      if (edit.category === 'crypto'){
+        coinId = edit.coinId || coinIdFromName(edit.name);
+        q = (edit.quantity === '' || edit.quantity == null) ? null : parseFloat(edit.quantity);
+        if (q != null && !isNaN(q) && a.priceEUR) v = q * a.priceEUR;   // recompute from last price
+      }
+      return { ...edit, value: v, quantity: q, coinId, lastUpdated: ISO(TODAY) };
+    }));
     setEditingId(null);
   };
   const removeAsset = id => { if (confirm('Delete this asset?')) save(assets.filter(a => a.id !== id)); };
   const addAsset = () => {
     if (!form.name || !form.value) return;
-    save([...assets, { id:uid(), name:form.name, note:form.note,
+    const base = { id:uid(), name:form.name, note:form.note,
       value:parseFloat(form.value) || 0, category:form.category,
-      institutionId:form.institutionId, lastUpdated: ISO(TODAY) }]);
-    setForm({ name:'', note:'', value:'', category:form.category, institutionId:form.institutionId });
+      institutionId:form.institutionId, lastUpdated: ISO(TODAY) };
+    if (form.category === 'crypto'){ base.coinId = form.coinId || coinIdFromName(form.name); base.quantity = null; base.priceEUR = null; }
+    if (form.category === 'stocks'){ base.isin = null; }
+    save([...assets, base]);
+    setForm({ name:'', note:'', value:'', category:form.category, institutionId:form.institutionId, coinId:'' });
     setAdding(false);
+  };
+  const refreshCrypto = () => {
+    const cryptos = assets.filter(a => a.category === 'crypto');
+    const ids = [...new Set(cryptos.map(a => a.coinId || coinIdFromName(a.name)).filter(Boolean))];
+    if (!ids.length){ flash('No recognised coins to price. Set each coin in its edit row first.'); return; }
+    setPricing(true);
+    fetchCryptoPrices(ids).then(prices => {
+      let priced = 0, boot = 0;
+      const next = assets.map(a => {
+        if (a.category !== 'crypto') return a;
+        const cid = a.coinId || coinIdFromName(a.name);
+        const px = (cid && prices[cid]) ? prices[cid].eur : null;
+        if (!px) return a;
+        let qty = a.quantity;
+        if (qty == null || qty === '' || isNaN(qty)){ qty = a.value > 0 ? a.value / px : 0; boot++; }
+        priced++;
+        return { ...a, coinId: cid, quantity: qty, priceEUR: px, value: qty * px, lastUpdated: ISO(TODAY) };
+      });
+      setData({ ...data, assets: next });
+      flash('Updated ' + priced + ' crypto position' + (priced === 1 ? '' : 's') +
+        (boot ? ' \u00b7 derived quantities for ' + boot + ' from current value' : '') + '.');
+      setPricing(false);
+    }).catch(err => { flash('Price fetch failed: ' + err.message + ' \u2014 values unchanged.'); setPricing(false); });
   };
   const updateLiab = (id, v) => setData({ ...data,
     liabilities: liabs.map(l => l.id === id ? { ...l, value:v, lastUpdated:ISO(TODAY) } : l),
@@ -510,6 +578,9 @@ function NetWorthTab({ data, setData }){
 
   return (
     <div className="stack">
+      {toast && <div className="toast">{toast}</div>}
+      {showDegiro && <BrokerImportModal data={data} onClose={() => setShowDegiro(false)}
+        onCommit={(nextAssets, msg) => { setData({ ...data, assets: nextAssets }); setShowDegiro(false); flash(msg); }}/>}
       <div className="grid3">
         <div className="card">
           <h3>Net worth</h3>
@@ -564,9 +635,12 @@ function NetWorthTab({ data, setData }){
           <div className="card">
             <div className="spread mb">
               <h2 style={{margin:0}}>Holdings</h2>
-              <button className="btn btn-blue" onClick={() => setAdding(!adding)}>
-                {adding ? 'Close' : '+ Add asset'}
-              </button>
+              <div className="row" style={{gap:8, flexWrap:'wrap'}}>
+                <button className="btn" onClick={refreshCrypto} disabled={pricing} title="Fetch live EUR prices from CoinGecko">
+                  {pricing ? '\u2026 pricing' : '\u21bb Refresh crypto'}</button>
+                <button className="btn" onClick={() => setShowDegiro(true)} title="Update stock values from a DEGIRO portfolio or Trade Republic transaction export">\ud83d\udce5 DEGIRO CSV</button>
+                <button className="btn btn-blue" onClick={() => setAdding(!adding)}>{adding ? 'Close' : '+ Add asset'}</button>
+              </div>
             </div>
 
             {adding && (
@@ -585,6 +659,13 @@ function NetWorthTab({ data, setData }){
                   <select value={form.institutionId} onChange={e => setForm({...form, institutionId:e.target.value})}>
                     {data.institutions.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
                   </select></label>
+                {form.category === 'crypto' && (
+                  <label className="fld">Coin (for live pricing)
+                    <select value={form.coinId || ''} onChange={e => setForm({...form, coinId:e.target.value})}>
+                      <option value="">\u2014 none \u2014</option>
+                      {COIN_LIST.map(t => <option key={t} value={COIN_IDS[t]}>{t}</option>)}
+                    </select></label>
+                )}
                 <button className="btn btn-green" onClick={addAsset}>Add</button>
               </div>
             )}
@@ -605,23 +686,50 @@ function NetWorthTab({ data, setData }){
                     <table>
                       <tbody>
                         {rows.map(a => editingId === a.id ? (
-                          <tr key={a.id}>
-                            <td><input style={{width:'95%'}} value={edit.name} onChange={e => setEdit({...edit, name:e.target.value})}/></td>
-                            <td><input style={{width:'95%'}} value={edit.note} onChange={e => setEdit({...edit, note:e.target.value})}/></td>
-                            <td className="r"><input type="number" style={{width:100}} value={edit.value} onChange={e => setEdit({...edit, value:e.target.value})}/></td>
-                            <td className="r" style={{whiteSpace:'nowrap'}}>
-                              <button className="btn-icon" title="Save" onClick={commitEdit}>✅</button>
-                              <button className="btn-icon" title="Cancel" onClick={() => setEditingId(null)}>✖️</button>
-                            </td>
-                          </tr>
+                          edit.category === 'crypto' ? (
+                            <tr key={a.id}>
+                              <td><input style={{width:'95%'}} value={edit.name} onChange={e => setEdit({...edit, name:e.target.value})}/></td>
+                              <td>
+                                <span className="row" style={{gap:4}}>
+                                  <select value={edit.coinId || ''} onChange={e => setEdit({...edit, coinId:e.target.value})} style={{maxWidth:84}}>
+                                    <option value="">coin\u2026</option>
+                                    {COIN_LIST.map(t => <option key={t} value={COIN_IDS[t]}>{t}</option>)}
+                                  </select>
+                                  <input type="number" step="any" placeholder="qty" style={{width:84}}
+                                    value={edit.quantity == null ? '' : edit.quantity}
+                                    onChange={e => setEdit({...edit, quantity:e.target.value})}/>
+                                </span>
+                              </td>
+                              <td className="r"><input type="number" style={{width:100}} value={edit.value} onChange={e => setEdit({...edit, value:e.target.value})}/></td>
+                              <td className="r" style={{whiteSpace:'nowrap'}}>
+                                <button className="btn-icon" title="Save" onClick={commitEdit}>\u2705</button>
+                                <button className="btn-icon" title="Cancel" onClick={() => setEditingId(null)}>\u2716\ufe0f</button>
+                              </td>
+                            </tr>
+                          ) : (
+                            <tr key={a.id}>
+                              <td><input style={{width:'95%'}} value={edit.name} onChange={e => setEdit({...edit, name:e.target.value})}/></td>
+                              <td><input style={{width:'95%'}} value={edit.note} onChange={e => setEdit({...edit, note:e.target.value})}/></td>
+                              <td className="r"><input type="number" style={{width:100}} value={edit.value} onChange={e => setEdit({...edit, value:e.target.value})}/></td>
+                              <td className="r" style={{whiteSpace:'nowrap'}}>
+                                <button className="btn-icon" title="Save" onClick={commitEdit}>\u2705</button>
+                                <button className="btn-icon" title="Cancel" onClick={() => setEditingId(null)}>\u2716\ufe0f</button>
+                              </td>
+                            </tr>
+                          )
                         ) : (
                           <tr key={a.id}>
                             <td style={{fontWeight:600}}>{a.name}</td>
-                            <td className="muted small">{a.note} <span style={{marginLeft:6}}>{relTime(a.lastUpdated)}</span></td>
+                            <td className="muted small">
+                              {a.note}
+                              {a.category === 'crypto' && a.quantity != null &&
+                                <span> \u00b7 {(+a.quantity).toLocaleString('nl-NL',{maximumFractionDigits:6})} {tickerFromName(a.name)}{a.priceEUR ? (' @ ' + fmt(a.priceEUR)) : ''}</span>}
+                              <span style={{marginLeft:6}}>{relTime(a.lastUpdated)}</span>
+                            </td>
                             <td className="r num" style={{fontWeight:700}}>{fmt(a.value)}</td>
                             <td className="r" style={{whiteSpace:'nowrap'}}>
-                              <button className="btn-icon" title="Edit" onClick={() => startEdit(a)}>✏️</button>
-                              <button className="btn-icon" title="Delete" onClick={() => removeAsset(a.id)}>🗑</button>
+                              <button className="btn-icon" title="Edit" onClick={() => startEdit(a)}>\u270f\ufe0f</button>
+                              <button className="btn-icon" title="Delete" onClick={() => removeAsset(a.id)}>\ud83d\uddd1</button>
                             </td>
                           </tr>
                         ))}
@@ -2677,6 +2785,221 @@ function SettingsTab({ data, setData }){
             onClick={doReset}>🔄 Reset to defaults</button>
         </div>
         <div className="sub mt">Reset requires typing RESET — it wipes everything and restores Sven's default data.</div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================ Broker portfolio CSV import (DEGIRO + Trade Republic) ============================ */
+function BrokerImportModal({ data, onClose, onCommit }){
+  const fileRef = useRef(null);
+  const [broker, setBroker] = useState('degiro');     // 'degiro' (portfolio CSV) | 'trade-republic' (transaction CSV)
+  const [rows, setRows] = useState(null);
+  const [mode, setMode] = useState(null);             // 'portfolio' | 'transaction'
+  const [err, setErr] = useState(null);
+  const stockAssets = data.assets.filter(a => a.category === 'stocks');
+
+  const STOP = ['the','etf','inc','corp','plc','holding','holdings','ord','reg','nv','sa','ag',
+    'common','stock','stocks','shares','share','class','co','company','ucits','acc','dist','usd','eur','core'];
+  const norm = s => String(s||'').toLowerCase().replace(/[^a-z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
+  const toks = s => norm(s).split(' ').filter(w => w.length > 2 && STOP.indexOf(w) === -1);
+  const matchAsset = (product, isin) => {
+    if (isin){
+      const byIsin = stockAssets.find(a => a.isin && a.isin.toUpperCase() === isin.toUpperCase());
+      if (byIsin) return byIsin.id;
+    }
+    const pt = toks(product); let best = null, bestScore = 0;
+    stockAssets.forEach(a => {
+      const at = toks(a.name);
+      const shared = pt.filter(w => at.indexOf(w) !== -1).length;
+      const score = shared / Math.max(1, Math.min(pt.length, at.length));
+      if (shared > 0 && score > bestScore){ bestScore = score; best = a.id; }
+    });
+    return bestScore >= 0.5 ? best : null;
+  };
+  const num = v => { const n = parseDutchAmount(v); return isNaN(n) ? 0 : n; };
+  const signedNum = v => {                            // keep a leading minus if present
+    const neg = /^\s*-/.test(String(v||''));
+    const n = num(v); return neg ? -Math.abs(n) : n;
+  };
+
+  /* DEGIRO: one row per holding, current value in EUR */
+  const parsePortfolio = parsed => {
+    const get = fieldGetter(parsed[0]);
+    const out = [];
+    parsed.slice(1).forEach(r => {
+      const product = get(r, ['product','productnaam','naam','name']);
+      if (!product) return;
+      const isin = get(r, ['symbool/isin','isin','symbol/isin','symboolisin']);
+      const qty  = parseDutchAmount(get(r, ['aantal','quantity','amount']));
+      const value = parseDutchAmount(get(r, ['waardeineur','waardeineuro','valueineur','value','waarde']));
+      if (isNaN(value)) return;
+      out.push({ key:uid(), product, isin:isin || '', shares:isNaN(qty) ? null : qty, value,
+        cost:null, lastRate:null, mapTo: matchAsset(product, isin) || '__new__' });
+    });
+    return out;
+  };
+
+  /* Trade Republic: transaction history → aggregate net shares + estimate value from last trade price */
+  const parseTransactions = parsed => {
+    const get = fieldGetter(parsed[0]);
+    const groups = {};
+    parsed.slice(1).forEach(r => {
+      const type = get(r, ['type','transactietype','art','transaction','transactiontype']).toLowerCase();
+      const assetType = get(r, ['assettype','asset type','soort']).toLowerCase();
+      const name = get(r, ['name','instrumentname','asset','product','naam','omschrijving']);
+      const isin = get(r, ['instrument','isin','symbool/isin','wkn/isin']);
+      if (!name && !isin) return;
+      if (assetType && /crypto/.test(assetType)) return;                     // skip crypto lines
+      const dateRaw = get(r, ['date','timestamp','datum','executiondate']);
+      const date = parseINGDate((dateRaw.match(/\d{4}-\d{2}-\d{2}/) || dateRaw.match(/\d{2}-\d{2}-\d{4}/) || [''])[0]) || dateRaw;
+      let sh = signedNum(get(r, ['shares','aantal','quantity','anzahl','stück','stuks','nominal']));
+      const rate = num(get(r, ['rate','price','kurs','koers','priceper','pricepershare','prijs','averageprice']));
+      if (!sh) return;                                                       // dividends/cash have no shares
+      if (/(sale|sell|verkoop|verkauf|sell-out)/.test(type) && sh > 0) sh = -sh;
+      const key = (isin || name).toUpperCase();
+      if (!groups[key]) groups[key] = { name, isin, shares:0, cost:0, lastRate:rate || 0, lastDate:'' };
+      groups[key].shares += sh;
+      if (sh > 0) groups[key].cost += sh * rate;
+      if (rate && (!groups[key].lastDate || String(date) >= groups[key].lastDate)){ groups[key].lastRate = rate; groups[key].lastDate = String(date); }
+      if (!groups[key].name && name) groups[key].name = name;
+      if (!groups[key].isin && isin) groups[key].isin = isin;
+    });
+    return Object.keys(groups).map(k => {
+      const g = groups[k];
+      const shares = Math.round(g.shares * 1e6) / 1e6;
+      return { key:uid(), product:g.name || k, isin:g.isin || '', shares,
+        lastRate:g.lastRate, value: shares * g.lastRate, cost:g.cost,
+        mapTo: matchAsset(g.name, g.isin) || '__new__' };
+    }).filter(r => r.shares > 0.000001);
+  };
+
+  const onFile = e => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    readFileSmart(f).then(text => {
+      const parsed = parseCSV(text).rows;
+      if (parsed.length < 2){ setErr('No rows found in this CSV.'); return; }
+      const m = broker === 'trade-republic' ? 'transaction' : 'portfolio';
+      const out = m === 'portfolio' ? parsePortfolio(parsed) : parseTransactions(parsed);
+      if (!out.length){
+        setErr(m === 'portfolio'
+          ? 'No value column found. A DEGIRO Portfolio export has a "Waarde in EUR" / "Value in EUR" column — make sure you exported Portfolio, not transactions.'
+          : 'No share transactions found. In Trade Republic use Profile \u2192 Account Statements \u2192 Transaction Export, then pick that CSV here.');
+        return;
+      }
+      setErr(null); setMode(m); setRows(out); e.target.value = '';
+    }).catch(er => setErr('Could not read file: ' + er.message));
+  };
+
+  const setMap = (key, v) => setRows(rows.map(r => r.key === key ? { ...r, mapTo:v } : r));
+
+  const commit = () => {
+    let assets = [...data.assets];
+    let updated = 0, added = 0;
+    rows.forEach(r => {
+      if (r.mapTo === '__skip__') return;
+      const patch = { value:r.value, isin:null, lastUpdated:ISO(TODAY) };
+      if (mode === 'transaction') patch.quantity = r.shares;
+      if (r.mapTo === '__new__'){
+        assets.push({ id:uid(), name:r.product, note:(broker === 'trade-republic' ? 'Trade Republic' : 'DEGIRO'),
+          value:r.value, category:'stocks', institutionId:broker, isin:r.isin || null,
+          quantity:(mode === 'transaction' ? r.shares : null), lastUpdated:ISO(TODAY) });
+        added++;
+      } else {
+        assets = assets.map(a => a.id === r.mapTo
+          ? { ...a, value:r.value, isin:(a.isin || r.isin || null),
+              quantity:(mode === 'transaction' ? r.shares : a.quantity), lastUpdated:ISO(TODAY) } : a);
+        updated++;
+      }
+    });
+    const tag = broker === 'trade-republic' ? 'Trade Republic' : 'DEGIRO';
+    onCommit(assets, tag + ' import: updated ' + updated + ', added ' + added + ' position' + (added === 1 ? '' : 's') +
+      (mode === 'transaction' ? ' \u00b7 values estimated from last trade price' : '') + '.');
+  };
+
+  const nMatch = rows ? rows.filter(r => r.mapTo !== '__skip__' && r.mapTo !== '__new__').length : 0;
+  const nNew   = rows ? rows.filter(r => r.mapTo === '__new__').length : 0;
+  const nSkip  = rows ? rows.filter(r => r.mapTo === '__skip__').length : 0;
+
+  return (
+    <div className="modal-back" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal">
+        <div className="spread mb">
+          <h2 style={{margin:0}}>📥 Import broker CSV</h2>
+          <button className="btn" onClick={onClose}>✕ Close</button>
+        </div>
+
+        {!rows && (
+          <div className="stack">
+            <div className="row" style={{gap:8, flexWrap:'wrap'}}>
+              <label className="row small muted" style={{gap:6}}>Broker:
+                <select value={broker} onChange={e => { setBroker(e.target.value); setErr(null); }}>
+                  <option value="degiro">DEGIRO — Portfolio export</option>
+                  <option value="trade-republic">Trade Republic — Transaction export</option>
+                </select>
+              </label>
+            </div>
+            <div className="card" style={{background:'var(--bg)', borderStyle:'dashed', textAlign:'center', padding:'24px'}}>
+              {broker === 'degiro'
+                ? <div className="mb small muted">DEGIRO: <b>Portfolio → Export → Portfolio</b>. Values arrive in EUR, so every position updates at once.</div>
+                : <div className="mb small muted">Trade Republic: <b>Profile → Account Statements → Transaction Export → Create</b>. This is a transaction history — the app sums your net shares and estimates value from your last trade price.</div>}
+              <button className="btn btn-blue" onClick={() => fileRef.current && fileRef.current.click()}>Choose CSV…</button>
+              <input ref={fileRef} type="file" accept=".csv,text/csv" style={{display:'none'}} onChange={onFile}/>
+            </div>
+            {err && <div className="small red">{err}</div>}
+          </div>
+        )}
+
+        {rows && (
+          <div className="stack">
+            <div className="small muted">
+              {mode === 'transaction'
+                ? 'Reconstructed from your Trade Republic transactions. Value = net shares × your last trade price (an estimate — adjust on the Holdings list after importing).'
+                : 'Matched to existing holdings by ISIN or name. Check the matches, then apply.'}
+            </div>
+            <div className="review-wrap">
+              <table>
+                <thead>
+                  {mode === 'transaction'
+                    ? <tr><th>Position</th><th className="r">Net shares</th><th className="r">Last price</th><th className="r">Est. value</th><th>Maps to holding</th></tr>
+                    : <tr><th>DEGIRO product</th><th className="r">Qty</th><th className="r">Value (EUR)</th><th>Maps to holding</th></tr>}
+                </thead>
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.key}>
+                      <td style={{fontWeight:600}}>{r.product}{r.isin && <span className="dim small num"> · {r.isin}</span>}</td>
+                      {mode === 'transaction'
+                        ? <React.Fragment>
+                            <td className="r num">{(+r.shares).toLocaleString('nl-NL',{maximumFractionDigits:4})}</td>
+                            <td className="r num muted">{r.lastRate ? fmt(r.lastRate) : '—'}</td>
+                            <td className="r num" style={{fontWeight:700}}>{fmt(r.value)}</td>
+                          </React.Fragment>
+                        : <React.Fragment>
+                            <td className="r num">{r.shares == null ? '—' : (+r.shares).toLocaleString('nl-NL',{maximumFractionDigits:4})}</td>
+                            <td className="r num" style={{fontWeight:700}}>{fmt(r.value)}</td>
+                          </React.Fragment>}
+                      <td>
+                        <select value={r.mapTo} onChange={e => setMap(r.key, e.target.value)}>
+                          <option value="__new__">➕ Add as new position</option>
+                          <option value="__skip__">Skip this row</option>
+                          {stockAssets.map(a => <option key={a.id} value={a.id}>{a.name} ({fmt0(a.value)})</option>)}
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="spread" style={{flexWrap:'wrap', gap:10}}>
+              <span className="small muted">{nMatch} matched · {nNew} new · {nSkip} skipped</span>
+              <span className="row" style={{gap:8}}>
+                <button className="btn" onClick={() => { setRows(null); setMode(null); }}>← Back</button>
+                <button className="btn btn-blue" onClick={commit}>Apply to holdings</button>
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
