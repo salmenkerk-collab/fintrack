@@ -353,12 +353,15 @@ function seedData(){
         note:'€1.040,68/mnd · Passeerdatum 16 dec 2024', lastUpdated:now },
     ],
     fireParams: {
-      birthYear:1997, targetAge:52, monthlyContribution:800,
+      birthYear:1997, targetAge:52, monthlyContribution:800, contributionSchedule:[],
       grossReturn:7, inflation:2.5,
       box3FictitiousReturn:6.17, box3TaxRate:36, box3Exempt:57000,
       annualWithdrawal:30000, swr:4,
     },
     income: { sven:3671, jointContribution:1000 },
+    goals: [
+      { id:'goal-car-2028', name:'New car', icon:'🚗', target:25000, targetDate:'2028-06', saved:0, monthly:0 },
+    ],
     fixedCosts: [
       { id:'hyp',  group:'Housing', name:'Hypotheek ING', amount:1040.68, note:'' },
       { id:'vve',  group:'Housing', name:'VVE bijdrage', amount:230.00, note:'Incl. brandverzekering — niet dubbel tellen' },
@@ -426,6 +429,8 @@ function migrate(d){
         costBasis: (a.costBasis != null ? a.costBasis : null) };
     return a;
   });
+  if (d.fireParams && !Array.isArray(d.fireParams.contributionSchedule)) d.fireParams.contributionSchedule = [];
+  if (!Array.isArray(d.goals)) d.goals = [{ id:'goal-car-2028', name:'New car', icon:'🚗', target:25000, targetDate:'2028-06', saved:0, monthly:0 }];
   return d;
 }
 
@@ -807,6 +812,14 @@ function box3Drag(p, fp){
   return fp.box3FictitiousReturn/100 * fp.box3TaxRate/100 * ((p - fp.box3Exempt) / p) * 100; // %-points
 }
 
+/* Monthly contribution active at a given age: the base amount, stepped up by the schedule. */
+function contribAtAge(fp, age){
+  let m = Number(fp.monthlyContribution) || 0;
+  const sched = (fp.contributionSchedule || []).slice().sort((a,b) => a.fromAge - b.fromAge);
+  for (const s of sched){ if (age >= s.fromAge) m = Number(s.monthly) || 0; }
+  return m;
+}
+
 /* Simulate one scenario. Returns trajectory rows + key milestones. */
 function simulate(startNW, fp, grossPct, inflPct){
   const startYear = TODAY.getFullYear();
@@ -828,8 +841,9 @@ function simulate(startNW, fp, grossPct, inflPct){
     const net = (grossPct - drag) / 100;
     const growth = v * net;
     rows[rows.length-1].growth = Math.round(growth);
-    rows[rows.length-1].contrib = fp.monthlyContribution * 12;
-    v = v + growth + fp.monthlyContribution * 12;
+    const monthly = contribAtAge(fp, age);
+    rows[rows.length-1].contrib = monthly * 12;
+    v = v + growth + monthly * 12;
   }
 
   /* Coast FIRE: earliest year where value, grown at GROSS return only (no more
@@ -856,7 +870,7 @@ function simulate(startNW, fp, grossPct, inflPct){
 
 /* Monthly contribution needed to hit the FIRE number exactly at target age (bisection). */
 function monthlyNeeded(startNW, fp){
-  const test = m => simulate(startNW, { ...fp, monthlyContribution:m }, fp.grossReturn, fp.inflation);
+  const test = m => simulate(startNW, { ...fp, monthlyContribution:m, contributionSchedule:[] }, fp.grossReturn, fp.inflation);
   let lo = 0, hi = 20000;
   const hits = m => { const s = test(m); return s.fireYear !== null && s.fireYear <= s.targetYear; };
   if (hits(0)) return 0;
@@ -875,6 +889,15 @@ function FireTab({ data, setData }){
     .reduce((s,a) => s + a.value, 0);
 
   const setFP = (k, v) => setData({ ...data, fireParams: { ...fp, [k]: v } });
+  const sched = fp.contributionSchedule || [];
+  const setSched = next => setData({ ...data, fireParams: { ...fp, contributionSchedule: next } });
+  const addStep = () => {
+    const baseAge = (sched.length ? Math.max.apply(null, sched.map(s => s.fromAge)) : currentAge(fp.birthYear)) + 5;
+    const lastM = sched.length ? sched[sched.length-1].monthly : fp.monthlyContribution;
+    setSched(sched.concat([{ fromAge: baseAge, monthly: Math.round((lastM * 1.25) / 50) * 50 }]));
+  };
+  const updateStep = (i, k, val) => setSched(sched.map((s, j) => j === i ? { ...s, [k]: val } : s));
+  const removeStep = i => setSched(sched.filter((s, j) => j !== i));
 
   const base = simulate(liquid, fp, fp.grossReturn, fp.inflation);
   const pess = simulate(liquid, fp, 5, 3);
@@ -971,6 +994,29 @@ function FireTab({ data, setData }){
           <label className="fld">Safe withdrawal rate
             <NumInput value={fp.swr} step={0.1} onChange={v => setFP('swr', v)} width={75} suffix="%"/></label>
         </div>
+
+        <div className="mt" style={{borderTop:'1px solid var(--surface2)', paddingTop:14}}>
+          <div className="spread" style={{flexWrap:'wrap', gap:8, marginBottom:6}}>
+            <span className="k" style={{fontWeight:600}}>Planned step-ups <span className="muted small">· invest more as your salary grows</span></span>
+            <button className="btn" onClick={addStep}>+ Add step-up</button>
+          </div>
+          <div className="sub" style={{marginBottom:8}}>Base is {fmt0(fp.monthlyContribution)}/mnd from now (age {currentAge(fp.birthYear)}). Each step raises the monthly amount from the age you set onward.</div>
+          {sched.length === 0
+            ? <div className="sub dim">No step-ups yet — the projection uses a flat {fmt0(fp.monthlyContribution)}/mnd. Add one to model future raises.</div>
+            : <div className="stack" style={{gap:6}}>
+                {sched.map((s, i) => (
+                  <div key={i} className="row" style={{gap:8, alignItems:'center', flexWrap:'wrap'}}>
+                    <span className="small muted">From age</span>
+                    <NumInput value={s.fromAge} width={64} onChange={v => updateStep(i, 'fromAge', v)}/>
+                    <span className="small muted">invest</span>
+                    <NumInput value={s.monthly} step={50} width={110} suffix="€/mnd" onChange={v => updateStep(i, 'monthly', v)}/>
+                    <span className="small dim">{s.fromAge > currentAge(fp.birthYear) ? '(in ' + (s.fromAge - currentAge(fp.birthYear)) + ' yr)' : '(now)'}</span>
+                    <button className="btn" style={{padding:'2px 8px'}} onClick={() => removeStep(i)} title="Remove step-up">🗑</button>
+                  </div>
+                ))}
+              </div>}
+        </div>
+
         <div className="sub mt">
           Current age: <b className="num">{currentAge(fp.birthYear)}</b> ·
           Box 3 tax drag at current portfolio: <b className="num">{pct1(dragNow)}</b>-pt ·
@@ -2998,7 +3044,7 @@ function BrokerImportModal({ data, onClose, onCommit }){
       if (!name && !isin) return;
       const sh = signedNum(get(r, ['aantal','quantity','shares','amount']));
       if (!sh) return;                                          // skip cash/dividend/fee rows
-      let eur = parseDutchAmount(get(r, ['waarde','value','totaal','total']));
+      let eur = parseDutchAmount(get(r, ['waardeeur','waarde','valueeur','value','totaaleur','totaal','total']));
       eur = isNaN(eur) ? 0 : Math.abs(eur);                     // EUR value of the trade
       const key = (isin || name).toUpperCase();
       if (!groups[key]) groups[key] = { name, isin, shares:0, buyShares:0, buyCost:0 };
@@ -3266,11 +3312,203 @@ function SpendingInsights({ data }){
   );
 }
 
+/* ============================ Savings goals ============================ */
+function goalMonthsLeft(fromMK, toMK){
+  const f = String(fromMK).split('-').map(Number), t = String(toMK).split('-').map(Number);
+  return (t[0] - f[0]) * 12 + (t[1] - f[1]);
+}
+function addMonthsMK(mk, n){
+  const p = String(mk).split('-').map(Number);
+  const d = new Date(p[0], p[1] - 1 + n, 1);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+function requiredMonthlyFor(target, saved, n, ratePct){
+  const remaining = Math.max(target - saved, 0);
+  if (remaining <= 0) return 0;
+  if (n <= 0) return remaining;
+  const r = (ratePct || 0) / 100 / 12;
+  if (r <= 0) return remaining / n;
+  const f = Math.pow(1 + r, n);
+  return Math.max((target - saved * f) / ((f - 1) / r), 0);
+}
+function monthsToReach(target, saved, monthly, ratePct){
+  if (saved >= target) return 0;
+  if (monthly <= 0) return Infinity;
+  const r = (ratePct || 0) / 100 / 12;
+  let v = saved, m = 0;
+  while (v < target && m < 1200){ v = v * (1 + r) + monthly; m++; }
+  return m >= 1200 ? Infinity : m;
+}
+
+function GoalsTab({ data, setData }){
+  const goals = data.goals || [];
+  const nowMK = monthKey();
+  const blank = { name:'', icon:'🎯', target:0, targetDate: addMonthsMK(nowMK, 24), saved:0, monthly:0 };
+  const [showForm, setShowForm] = useState(goals.length === 0);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(blank);
+
+  const setGoals = next => setData({ ...data, goals: next });
+  const setGoal = (id, k, v) => setGoals(goals.map(g => g.id === id ? { ...g, [k]: v } : g));
+  const startAdd = () => { setForm(blank); setEditingId(null); setShowForm(true); };
+  const startEdit = g => { setForm({ name:g.name, icon:g.icon || '🎯', target:g.target, targetDate:g.targetDate, saved:g.saved || 0, monthly:g.monthly || 0 }); setEditingId(g.id); setShowForm(true); };
+  const save = () => {
+    if (!form.name || !form.target || !form.targetDate) return;
+    const g = { name:String(form.name).trim(), icon:form.icon || '🎯', target:Number(form.target) || 0,
+      targetDate:form.targetDate, saved:Number(form.saved) || 0, monthly:Number(form.monthly) || 0 };
+    if (editingId) setGoals(goals.map(x => x.id === editingId ? { ...x, ...g } : x));
+    else setGoals(goals.concat([{ id:uid(), ...g }]));
+    setForm(blank); setEditingId(null); setShowForm(false);
+  };
+  const del = id => setGoals(goals.filter(g => g.id !== id));
+
+  /* honest "free to save" estimate, consistent with the Budget tab's surplus */
+  const totalIn = ((data.income || {}).sven || 0) + ((data.income || {}).jointContribution || 0);
+  const monthlyFixed = (data.fixedCosts || []).reduce((s, c) => s + monthlyEq(c), 0);
+  const varByMonth = {};
+  (data.transactions || []).filter(t => t.amount < 0 && !t.isTransfer && catOf(data, t.categoryId).type === 'variable')
+    .forEach(t => { const mk = t.date.slice(0,7); varByMonth[mk] = (varByMonth[mk] || 0) + Math.abs(t.amount); });
+  const varMonths = Object.keys(varByMonth);
+  const avgVar = varMonths.length ? varMonths.reduce((s, m) => s + varByMonth[m], 0) / varMonths.length : null;
+  const typicalSurplus = avgVar != null ? totalIn - monthlyFixed - avgVar : null;
+
+  const calc = g => {
+    const n = Math.max(goalMonthsLeft(nowMK, g.targetDate), 0);
+    const remaining = Math.max(g.target - (g.saved || 0), 0);
+    const reached = (g.saved || 0) >= g.target && g.target > 0;
+    const required = requiredMonthlyFor(g.target, g.saved || 0, n, 0);
+    const pct = g.target > 0 ? Math.min(100, (g.saved || 0) / g.target * 100) : 0;
+    const planned = g.monthly || 0;
+    const projMonths = planned > 0 ? monthsToReach(g.target, g.saved || 0, planned, 0) : Infinity;
+    const projDate = isFinite(projMonths) ? addMonthsMK(nowMK, projMonths) : null;
+    const onTrack = planned > 0 && isFinite(projMonths) && projMonths <= n;
+    return { n, remaining, reached, required, pct, planned, projMonths, projDate, onTrack };
+  };
+
+  const totalRequired = goals.reduce((s, g) => s + calc(g).required, 0);
+  const totalSaved = goals.reduce((s, g) => s + (g.saved || 0), 0);
+  const totalTarget = goals.reduce((s, g) => s + g.target, 0);
+
+  return (
+    <div className="stack">
+      <div className="card">
+        <div className="spread" style={{flexWrap:'wrap', gap:8}}>
+          <h2 style={{margin:0}}>Savings goals</h2>
+          <button className="btn btn-blue" onClick={startAdd}>+ Add goal</button>
+        </div>
+        {goals.length > 0 &&
+          <div className="grid3 mt">
+            <div className="card" style={{background:'var(--bg)'}}>
+              <h3>Goals</h3><div className="metric">{goals.length}</div>
+              <div className="sub">{fmt0(totalSaved)} saved of {fmt0(totalTarget)}</div>
+            </div>
+            <div className="card" style={{background:'var(--bg)'}}>
+              <h3>To set aside</h3><div className="metric">{fmt0(totalRequired)}<span className="sub"> /mnd</span></div>
+              <div className="sub">across all goals, to hit every date</div>
+            </div>
+            <div className="card" style={{background:'var(--bg)'}}>
+              <h3>Typical monthly surplus</h3>
+              {typicalSurplus != null
+                ? <React.Fragment>
+                    <div className={'metric ' + (typicalSurplus >= totalRequired ? 'green' : 'yellow')}>{fmt0(typicalSurplus)}</div>
+                    <div className="sub">{typicalSurplus >= totalRequired ? 'comfortably covers your goals' : 'tight — goals need ' + fmt0(totalRequired) + '/mnd'}</div>
+                  </React.Fragment>
+                : <React.Fragment><div className="metric dim">—</div><div className="sub">import a few months of spending to estimate</div></React.Fragment>}
+            </div>
+          </div>}
+      </div>
+
+      {showForm &&
+        <div className="card">
+          <h3>{editingId ? 'Edit goal' : 'New goal'}</h3>
+          <div className="form-grid">
+            <label className="fld">Name<input value={form.name} onChange={e => setForm({ ...form, name:e.target.value })} placeholder="e.g. New car" style={{width:170}}/></label>
+            <label className="fld">Icon<input value={form.icon} onChange={e => setForm({ ...form, icon:e.target.value })} style={{width:56, textAlign:'center'}}/></label>
+            <label className="fld">Target<NumInput value={form.target} step={500} onChange={v => setForm({ ...form, target:v })} suffix="€"/></label>
+            <label className="fld">Target date<input type="month" value={form.targetDate} onChange={e => setForm({ ...form, targetDate:e.target.value })} style={{width:160}}/></label>
+            <label className="fld">Already saved<NumInput value={form.saved} step={100} onChange={v => setForm({ ...form, saved:v })} suffix="€"/></label>
+            <label className="fld">Planned/mnd <span className="dim">(optional)</span><NumInput value={form.monthly} step={25} onChange={v => setForm({ ...form, monthly:v })} suffix="€"/></label>
+          </div>
+          <div className="row mt" style={{gap:8}}>
+            <button className="btn btn-blue" onClick={save}>{editingId ? 'Save' : 'Add goal'}</button>
+            <button className="btn" onClick={() => { setShowForm(false); setEditingId(null); }}>Cancel</button>
+          </div>
+        </div>}
+
+      {goals.length === 0 && !showForm &&
+        <div className="card"><div className="sub">No goals yet. Add one — like a 25.000 car in 2028 — and you'll get a monthly savings target.</div></div>}
+
+      {goals.slice().sort((a, b) => String(a.targetDate).localeCompare(String(b.targetDate))).map(g => {
+        const c = calc(g);
+        return (
+          <div key={g.id} className="card">
+            <div className="spread" style={{flexWrap:'wrap', gap:8, alignItems:'flex-start'}}>
+              <div>
+                <h2 style={{margin:0}}>{g.icon} {g.name}</h2>
+                <div className="sub">{fmt0(g.target)} by {monthLabel(g.targetDate)} · {c.reached ? 'reached 🎉' : (c.n > 0 ? c.n + ' months left' : 'due now')}</div>
+              </div>
+              <div className="row" style={{gap:4}}>
+                <button className="btn" style={{padding:'4px 10px'}} onClick={() => startEdit(g)}>✏️</button>
+                <button className="btn" style={{padding:'4px 10px'}} onClick={() => del(g.id)}>🗑</button>
+              </div>
+            </div>
+
+            <div style={{position:'relative', height:12, background:'var(--bg)', borderRadius:8, marginTop:12}}>
+              <div style={{position:'absolute', left:0, top:0, height:'100%', width:c.pct + '%',
+                background: c.reached ? 'var(--green)' : 'linear-gradient(90deg,#3b82f6,#4ade80)', borderRadius:8, transition:'width .4s'}}></div>
+            </div>
+            <div className="spread" style={{marginTop:6}}>
+              <span className="small num green">{fmt0(g.saved || 0)} saved</span>
+              <span className="small num muted">{pct1(c.pct)}</span>
+              <span className="small num dim">{fmt0(g.target)}</span>
+            </div>
+
+            <div className="card mt" style={{background:'var(--bg)'}}>
+              {c.reached
+                ? <div className="green">You've hit this goal — {fmt0(g.saved || 0)} saved. 🎉</div>
+                : <React.Fragment>
+                    <div style={{fontSize:15}}>Set aside <b className="green">{fmt0(c.required)}/mnd</b> to reach {fmt0(g.target)} by {monthLabel(g.targetDate)}.</div>
+                    <div className="sub">{fmt0(c.remaining)} to go{c.n > 0 ? ' over ' + c.n + ' months' : ' — the date has passed, so save it now'}.</div>
+                  </React.Fragment>}
+            </div>
+
+            {!c.reached &&
+              <div className="kv mt" style={{flexWrap:'wrap', gap:8}}>
+                <span className="k">I plan to save</span>
+                <span className="v row" style={{gap:8, alignItems:'center', flexWrap:'wrap'}}>
+                  <NumInput value={g.monthly || 0} step={25} width={120} suffix="€/mnd" onChange={v => setGoal(g.id, 'monthly', v)}/>
+                  {c.planned > 0 &&
+                    (c.onTrack
+                      ? <span className="badge badge-green">On track · done by {monthLabel(c.projDate)}</span>
+                      : (isFinite(c.projMonths)
+                          ? <span className="badge" style={{background:'rgba(251,191,36,.15)', color:'var(--yellow)'}}>Short — not until {monthLabel(c.projDate)}</span>
+                          : <span className="badge" style={{background:'rgba(248,113,113,.15)', color:'var(--red)'}}>Set a monthly amount</span>))}
+                </span>
+              </div>}
+
+            <div className="kv" style={{flexWrap:'wrap', gap:8}}>
+              <span className="k">Update saved so far</span>
+              <span className="v"><NumInput value={g.saved || 0} step={100} width={130} suffix="€" onChange={v => setGoal(g.id, 'saved', v)}/></span>
+            </div>
+          </div>
+        );
+      })}
+
+      <div className="card" style={{borderStyle:'dashed'}}>
+        <div className="small muted" style={{lineHeight:1.6}}>
+          Tip: open a dedicated ING savings pot per goal and set an automatic monthly transfer for the amount above — then just bump "saved so far" here when money lands. Goals are tracked separately from your investments, so they never skew your FIRE projection.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ============================ App shell ============================ */
 const TABS = [
   { id:'networth', label:'Net Worth' },
   { id:'fire',     label:'FIRE' },
   { id:'budget',   label:'Budget' },
+  { id:'goals',    label:'Goals' },
   { id:'portfolio',label:'Portfolio' },
   { id:'property', label:'Property' },
   { id:'history',  label:'History' },
@@ -3309,6 +3547,7 @@ function FinanceModel(){
         {tab === 'networth' && <NetWorthTab data={data} setData={setData}/>}
         {tab === 'fire'     && <FireTab data={data} setData={setData}/>}
         {tab === 'budget'   && <BudgetTab data={data} setData={setData}/>}
+        {tab === 'goals'    && <GoalsTab data={data} setData={setData}/>}
         {tab === 'portfolio'&& <PortfolioTab data={data} setData={setData}/>}
         {tab === 'property' && <PropertyTab data={data} setData={setData}/>}
         {tab === 'history'  && <HistoryTab data={data} setData={setData}/>}
