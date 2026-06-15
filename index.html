@@ -2626,7 +2626,7 @@ const EMOJI_OPTIONS = ['🏠','🛒','🍽','🚗','💊','🎮','🛍','💼','
 const COLOR_OPTIONS = ['#4ade80','#fb923c','#a78bfa','#f87171','#fbbf24','#3b82f6','#ec4899','#94a3b8'];
 const slugify = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-function SettingsTab({ data, setData }){
+function SettingsTab({ data, setData, sync }){
   const [pop, setPop] = useState(null);                 // { id, kind:'icon'|'color' }
   const dragIdx = useRef(null);
   const [dragOver, setDragOver] = useState(null);
@@ -2749,6 +2749,7 @@ function SettingsTab({ data, setData }){
 
   return (
     <div className="stack">
+      <CloudSyncPanel sync={sync}/>
       {/* ---------- A — Categories ---------- */}
       <div className="card">
         <h2>A · Categories</h2>
@@ -3503,6 +3504,227 @@ function GoalsTab({ data, setData }){
   );
 }
 
+/* ============================ Cloud sync (Firebase) ============================ */
+const FB_VER = '10.12.2';
+const FB_CONFIG_KEY = 'sven_finance_fb';
+const FB_BASE_KEY = 'sven_finance_fb_base';
+
+function parseFirebaseConfig(text){
+  if (!text) return null;
+  try { const o = JSON.parse(text); if (o && o.apiKey && o.projectId) return o; } catch(e){}
+  const keys = ['apiKey','authDomain','projectId','storageBucket','messagingSenderId','appId','measurementId','databaseURL'];
+  const cfg = {};
+  keys.forEach(k => { const m = text.match(new RegExp(k + '\\s*:\\s*["\']([^"\']+)["\']')); if (m) cfg[k] = m[1]; });
+  return (cfg.apiKey && cfg.projectId) ? cfg : null;
+}
+
+let _fbLoading = null;
+function loadFirebaseSDK(){
+  if (window.firebase && window.firebase.firestore) return Promise.resolve(window.firebase);
+  if (_fbLoading) return _fbLoading;
+  const base = 'https://www.gstatic.com/firebasejs/' + FB_VER + '/';
+  const files = ['firebase-app-compat.js','firebase-auth-compat.js','firebase-firestore-compat.js'];
+  _fbLoading = files.reduce((p, f) => p.then(() => new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = base + f; s.async = false;
+    s.onload = res; s.onerror = () => rej(new Error('Could not load ' + f + ' — check your connection or the SDK version.'));
+    document.head.appendChild(s);
+  })), Promise.resolve()).then(() => window.firebase);
+  return _fbLoading;
+}
+
+function useCloudSync(data, setData){
+  const [config, setConfig] = useState(() => { try { return JSON.parse(localStorage.getItem(FB_CONFIG_KEY) || 'null'); } catch(e){ return null; } });
+  const [user, setUser] = useState(null);
+  const [status, setStatus] = useState('off');      // off | loading | signedout | syncing | synced | error
+  const [error, setError] = useState(null);
+  const [lastAt, setLastAt] = useState(null);
+  const [conflict, setConflict] = useState(null);    // { payload, at }
+
+  const fb = useRef(null);
+  const docRef = useRef(null);
+  const unsub = useRef(null);
+  const authBound = useRef(false);
+  const firstSnap = useRef(true);
+  const lastPayload = useRef(null);
+  const writeTimer = useRef(null);
+  const dataRef = useRef(data);
+  useEffect(() => { dataRef.current = data; }, [data]);
+  useEffect(() => { try { lastPayload.current = localStorage.getItem(FB_BASE_KEY); } catch(e){} }, []);
+
+  const setBase = json => { lastPayload.current = json; try { localStorage.setItem(FB_BASE_KEY, json); } catch(e){} };
+
+  function detach(){ if (unsub.current){ unsub.current(); unsub.current = null; } docRef.current = null; firstSnap.current = true; }
+
+  function applyRemote(rp){
+    try {
+      const parsed = JSON.parse(rp);
+      const migrated = migrate({ ...seedData(), ...parsed });
+      setBase(JSON.stringify(migrated));
+      setData(migrated);
+      setStatus('synced'); setError(null);
+    } catch(e){ setError('Could not read cloud data: ' + e.message); setStatus('error'); }
+  }
+
+  function pushLocal(json){
+    const ref = docRef.current; if (!ref) return;
+    const j = json || JSON.stringify(dataRef.current);
+    setStatus('syncing');
+    ref.set({ payload: j, updatedAt: Date.now() }).then(() => {
+      setBase(j); setLastAt(Date.now()); setStatus('synced'); setError(null);
+    }).catch(e => { setError(e.message); setStatus('error'); });
+  }
+
+  function startSync(u){
+    const firebase = fb.current;
+    setStatus('syncing'); setError(null);
+    const ref = firebase.firestore().collection('fintrack').doc(u.uid);
+    docRef.current = ref; firstSnap.current = true;
+    if (unsub.current) unsub.current();
+    unsub.current = ref.onSnapshot(snap => {
+      const localJSON = JSON.stringify(dataRef.current);
+      const base = lastPayload.current;
+      if (!snap.exists){
+        if (firstSnap.current){ firstSnap.current = false; pushLocal(localJSON); }
+        return;
+      }
+      const remote = snap.data() || {};
+      const rp = remote.payload || '';
+      const at = remote.updatedAt || Date.now();
+      if (firstSnap.current){
+        firstSnap.current = false;
+        if (rp === localJSON){ setBase(rp); setLastAt(at); setStatus('synced'); }
+        else if (rp === base){ pushLocal(localJSON); }              // remote unchanged, local newer -> push
+        else if (localJSON === base){ applyRemote(rp); setLastAt(at); } // local unchanged, remote newer -> pull
+        else { setConflict({ payload: rp, at: remote.updatedAt || null }); setStatus('synced'); } // both changed -> ask
+        return;
+      }
+      if (rp && rp !== lastPayload.current){ applyRemote(rp); setLastAt(at); }   // live change from another device
+    }, err => { setError(err.message); setStatus('error'); });
+  }
+
+  useEffect(() => {
+    if (!config){ setStatus('off'); return; }
+    let alive = true;
+    setStatus('loading'); setError(null);
+    loadFirebaseSDK().then(firebase => {
+      if (!alive) return;
+      fb.current = firebase;
+      if (!firebase.apps.length) firebase.initializeApp(config);
+      if (!authBound.current){
+        authBound.current = true;
+        firebase.auth().onAuthStateChanged(u => { setUser(u); if (u) startSync(u); else { detach(); setStatus('signedout'); } });
+      } else {
+        const cu = firebase.auth().currentUser; setUser(cu);
+        if (cu) startSync(cu); else setStatus('signedout');
+      }
+    }).catch(e => { if (alive){ setError(e.message); setStatus('error'); } });
+    return () => { alive = false; };
+  }, [config]);
+
+  useEffect(() => {
+    if (!user || !docRef.current || conflict) return;
+    const json = JSON.stringify(data);
+    if (json === lastPayload.current) return;
+    if (writeTimer.current) clearTimeout(writeTimer.current);
+    writeTimer.current = setTimeout(() => pushLocal(json), 1200);
+    return () => { if (writeTimer.current) clearTimeout(writeTimer.current); };
+  }, [data, user, conflict]);
+
+  const saveConfig = text => {
+    const cfg = parseFirebaseConfig(text);
+    if (!cfg){ setError('Could not read that — paste the whole firebaseConfig block (with apiKey and projectId).'); return false; }
+    try { localStorage.setItem(FB_CONFIG_KEY, JSON.stringify(cfg)); } catch(e){}
+    setError(null); setConfig(cfg); return true;
+  };
+  const removeConfig = () => {
+    detach();
+    try { if (fb.current) fb.current.auth().signOut(); } catch(e){}
+    try { localStorage.removeItem(FB_CONFIG_KEY); } catch(e){}
+    setConfig(null); setUser(null); setConflict(null); setStatus('off');
+  };
+  const signIn = () => {
+    setError(null);
+    const firebase = fb.current;
+    if (!firebase){ setError('Still connecting — try again in a second.'); return; }
+    try { firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider()).catch(e => setError(e.message)); }
+    catch(e){ setError(e.message); }
+  };
+  const signOut = () => { try { fb.current.auth().signOut(); } catch(e){} };
+  const resolveConflict = which => {
+    if (!conflict) return;
+    if (which === 'cloud') applyRemote(conflict.payload);
+    else pushLocal(JSON.stringify(dataRef.current));
+    setConflict(null);
+  };
+  const syncNow = () => pushLocal(JSON.stringify(dataRef.current));
+
+  return { config, user, status, error, lastAt, conflict,
+    projectId: config ? config.projectId : null,
+    saveConfig, removeConfig, signIn, signOut, resolveConflict, syncNow };
+}
+
+function CloudSyncPanel({ sync }){
+  const [txt, setTxt] = useState('');
+  const s = sync;
+  const ts = s.lastAt ? new Date(s.lastAt).toLocaleString('nl-NL') : null;
+  return (
+    <div className="card">
+      <h2>☁️ Cloud sync <span className="muted small">· keep your devices in sync</span></h2>
+
+      {!s.config &&
+        <React.Fragment>
+          <div className="sub mb">Paste your Firebase <b>firebaseConfig</b> block (Firebase console → Project settings → Your apps). It stays on this device and is never part of your synced data.</div>
+          <textarea value={txt} onChange={e => setTxt(e.target.value)} placeholder="Paste the firebaseConfig block here…"
+            style={{width:'100%', minHeight:120, background:'#0f172a', color:'#e2e8f0', border:'1px solid #334155', borderRadius:8, padding:10, fontFamily:'monospace', fontSize:12}}/>
+          <div className="row mt"><button className="btn btn-blue" onClick={() => { if (s.saveConfig(txt)) setTxt(''); }}>Save config</button></div>
+          {s.error && <div className="sub red mt">{s.error}</div>}
+        </React.Fragment>}
+
+      {s.config &&
+        <React.Fragment>
+          <div className="kv"><span className="k">Project</span><span className="v num">{s.projectId}</span></div>
+          <div className="kv"><span className="k">Status</span><span className="v">
+            {s.status === 'loading' && <span className="muted">Connecting…</span>}
+            {s.status === 'signedout' && <span className="muted">Not signed in</span>}
+            {s.status === 'syncing' && <span style={{color:'var(--yellow)'}}>Syncing…</span>}
+            {s.status === 'synced' && <span className="green">● Synced{ts ? ' · ' + ts : ''}</span>}
+            {s.status === 'error' && <span className="red">Error</span>}
+            {s.status === 'off' && <span className="muted">Off</span>}
+          </span></div>
+          {s.error && <div className="sub red mb">{s.error}</div>}
+
+          {!s.user
+            ? <div className="row mt" style={{gap:8, flexWrap:'wrap'}}>
+                <button className="btn btn-blue" onClick={s.signIn}>Sign in with Google</button>
+                <button className="btn" onClick={s.removeConfig}>Remove config</button>
+              </div>
+            : <React.Fragment>
+                <div className="kv"><span className="k">Signed in</span><span className="v">{s.user.email || s.user.uid}</span></div>
+
+                {s.conflict &&
+                  <div className="card mt" style={{background:'var(--bg)', borderColor:'var(--yellow)'}}>
+                    <div style={{color:'var(--yellow)', fontWeight:600, marginBottom:6}}>This device and the cloud both have data</div>
+                    <div className="sub mb">The cloud copy{s.conflict.at ? ' (saved ' + new Date(s.conflict.at).toLocaleString('nl-NL') + ')' : ''} differs from what's on this device. Which should win?</div>
+                    <div className="row" style={{gap:8, flexWrap:'wrap'}}>
+                      <button className="btn btn-blue" onClick={() => s.resolveConflict('cloud')}>Use cloud copy</button>
+                      <button className="btn" onClick={() => s.resolveConflict('device')}>Keep this device (overwrite cloud)</button>
+                    </div>
+                  </div>}
+
+                <div className="row mt" style={{gap:8, flexWrap:'wrap'}}>
+                  <button className="btn" onClick={s.syncNow}>Sync now</button>
+                  <button className="btn" onClick={s.signOut}>Sign out</button>
+                  <button className="btn" onClick={s.removeConfig}>Remove config</button>
+                </div>
+              </React.Fragment>}
+        </React.Fragment>}
+
+      <div className="sub mt" style={{lineHeight:1.6}}>Changes sync automatically a moment after you make them and arrive live on your other signed-in devices. If two devices edit at the same time, the most recent save wins. Your data backup (export/import) still works independently.</div>
+    </div>
+  );
+}
+
 /* ============================ App shell ============================ */
 const TABS = [
   { id:'networth', label:'Net Worth' },
@@ -3518,6 +3740,7 @@ const TABS = [
 function FinanceModel(){
   const [data, setData] = useState(loadData);
   const [tab, setTab] = useState('networth');
+  const sync = useCloudSync(data, setData);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e){}
@@ -3551,7 +3774,7 @@ function FinanceModel(){
         {tab === 'portfolio'&& <PortfolioTab data={data} setData={setData}/>}
         {tab === 'property' && <PropertyTab data={data} setData={setData}/>}
         {tab === 'history'  && <HistoryTab data={data} setData={setData}/>}
-        {tab === 'settings' && <SettingsTab data={data} setData={setData}/>}
+        {tab === 'settings' && <SettingsTab data={data} setData={setData} sync={sync}/>}
       </main>
     </div>
   );
