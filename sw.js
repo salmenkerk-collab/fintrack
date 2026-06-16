@@ -1,6 +1,6 @@
 // IMPORTANT: bump CACHE_VERSION on every deploy to force the PWA to fetch the new index.html.
 // Otherwise users see the old cached version forever.
-const CACHE_VERSION = 'finance-v19-ingfix';
+const CACHE_VERSION = 'finance-v20-broker';
 const ASSETS = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', e => {

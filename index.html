@@ -476,6 +476,16 @@ function migrate(d){
   });
   if (d.fireParams && !Array.isArray(d.fireParams.contributionSchedule)) d.fireParams.contributionSchedule = [];
   if (!Array.isArray(d.goals)) d.goals = [{ id:'goal-car-2028', name:'New car', icon:'🚗', target:25000, targetDate:'2028-06', saved:0, monthly:0 }];
+  /* one-time retro: tag already-imported broker funding (Flatex / DEGIRO / Trade Republic)
+     and own-savings moves as transfers, so they drop out of spending & recurring-cost views */
+  if (!d.settings._xfRetroV1){
+    const XF = /\b(flatex|degiro|trade ?republic)\b/i, SAV = /spaarrekening/i;
+    (d.transactions || []).forEach(t => {
+      const blob = (t.description || '') + ' ' + (t.raw || '');
+      if (!t.isTransfer && (XF.test(blob) || SAV.test(blob))){ t.isTransfer = true; t.categoryId = 'transfer'; }
+    });
+    d.settings._xfRetroV1 = true;
+  }
   return d;
 }
 
@@ -2336,7 +2346,9 @@ function ImportModal({ data, onClose, onCommit }){
           if (afbij === 'af') amount = -Math.abs(amount);
           else if (afbij === 'bij') amount = Math.abs(amount);
           const counter = get(row, ['tegenrekening','counterparty']).replace(/\s+/g, '').toUpperCase();
-          const isTransfer = (!!counter && ibanSet.has(counter)) || (!counter && /spaarrekening/i.test(mede));
+          const isTransfer = (!!counter && ibanSet.has(counter))
+            || (!counter && /spaarrekening/i.test(mede))
+            || /\b(flatex|degiro|trade ?republic)\b/i.test(name + ' ' + mede);
           const merchant = extractMerchant(name, mede);
           const descRaw = (name + (mede ? ' · ' + mede : '')).slice(0, 140);
           const hash = djb2(date + '|' + amount.toFixed(2) + '|' + normKey(name));
