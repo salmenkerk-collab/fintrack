@@ -781,7 +781,9 @@ function NetWorthTab({ data, setData }){
                           )
                         ) : (
                           <tr key={a.id}>
-                            <td style={{fontWeight:600}}>{a.name}</td>
+                            <td style={{fontWeight:600}}>
+                              <span style={{display:'inline-flex', alignItems:'center'}}><HoldingIcon asset={a}/>{a.name}</span>
+                            </td>
                             <td className="muted small">
                               {a.note}
                               {a.category === 'crypto' && a.quantity != null &&
@@ -1265,6 +1267,8 @@ function BudgetTab({ data, setData }){
     setVForm({ name:'', amount:'', categoryId:vForm.categoryId });
   };
   const delTx = id => setData({ ...data, transactions: data.transactions.filter(t => t.id !== id) });
+  const setTxCat = (id, cid) => setData({ ...data, transactions: (data.transactions || []).map(t =>
+    t.id === id ? { ...t, categoryId: cid, isTransfer: cid === 'transfer' } : t) });
 
   const showToast = msg => {
     setToast(msg);
@@ -1500,7 +1504,13 @@ function BudgetTab({ data, setData }){
                       <tr key={t.id}>
                         <td className="num dim small">{t.date.slice(5)}</td>
                         <td style={{fontWeight:600}}>{t.description}{t.ing && <span className="badge badge-blue" style={{marginLeft:6}}>ING</span>}</td>
-                        <td className="muted small">{c.icon} {c.name}</td>
+                        <td className="small">
+                          <select value={t.categoryId} onChange={e => setTxCat(t.id, e.target.value)}
+                            style={{fontSize:12, padding:'3px 6px', maxWidth:184}}>
+                            {(data.categories || []).map(x => <option key={x.id} value={x.id}>{x.icon} {x.name}</option>)}
+                            <option value="transfer">🔁 Overboeking (transfer)</option>
+                          </select>
+                        </td>
                         <td className="dim small">{ACCOUNT_LABELS[t.account] || t.account || '—'}</td>
                         <td className="r num">{fmt(t.amount)}</td>
                         <td className="r"><button className="btn-icon" title="Delete" onClick={() => delTx(t.id)}>🗑</button></td>
@@ -1546,6 +1556,39 @@ function BudgetTab({ data, setData }){
       {showImport && <ImportModal data={data} onClose={() => setShowImport(false)} onCommit={commitImport}/>}
     </div>
   );
+}
+
+/* ---- holding icons: real coin / brand logos with a warm monogram fallback ---- */
+const STOCK_DOMAINS = [
+  [/nvidia/i,'nvidia.com'], [/amazon/i,'amazon.com'], [/asml/i,'asml.com'],
+  [/tesla/i,'tesla.com'], [/alibaba/i,'alibaba.com'], [/celsius/i,'celsiusholdings.com'],
+  [/crocs/i,'crocs.com'], [/shell/i,'shell.com'], [/vanguard/i,'vanguard.com'],
+  [/ishares|blackrock/i,'ishares.com'], [/uranium|global ?x/i,'globalxetfs.com'],
+  [/microsoft/i,'microsoft.com'], [/apple/i,'apple.com'], [/alphabet|google/i,'abc.xyz'],
+  [/meta|facebook/i,'meta.com'], [/visa/i,'visa.com'], [/novo nordisk/i,'novonordisk.com'],
+];
+function stockDomain(name){ for (const pair of STOCK_DOMAINS) if (pair[0].test(name || '')) return pair[1]; return null; }
+function cryptoSym(a){ const m = (a.name || '').match(/\(([A-Za-z0-9]+)\)/); return m ? m[1].toLowerCase() : ''; }
+function monoColor(s){ const warm = ['#4A211C','#5E6B3B','#9A6A34','#988C6C','#A2492B','#B98A2E','#8C5A6B'];
+  let h = 0; for (let i = 0; i < (s || '').length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return warm[h % warm.length]; }
+function HoldingIcon({ asset }){
+  const [bad, setBad] = useState(false);
+  if (!asset || (asset.category !== 'crypto' && asset.category !== 'stocks')) return null;
+  let src = null, label = '';
+  if (asset.category === 'crypto'){
+    const sym = cryptoSym(asset);
+    label = (sym || asset.name || '?').toUpperCase().slice(0, 3);
+    if (sym) src = 'https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/' + sym + '.svg';
+  } else {
+    const dom = stockDomain(asset.name);
+    label = (asset.name || '?').replace(/[^A-Za-z ]/g, ' ').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || '#';
+    if (dom) src = 'https://www.google.com/s2/favicons?domain=' + dom + '&sz=64';
+  }
+  const box = { width:24, height:24, borderRadius:6, flexShrink:0, marginRight:9 };
+  if (src && !bad) return <img src={src} alt="" loading="lazy" onError={() => setBad(true)}
+    style={{ ...box, objectFit:'contain', background:'#fff', border:'1px solid var(--rule)' }}/>;
+  return <span style={{ ...box, display:'inline-flex', alignItems:'center', justifyContent:'center',
+    background: monoColor(asset.name), color:'#F3EDE2', fontSize:9.5, fontWeight:700, letterSpacing:'.3px' }}>{label}</span>;
 }
 
 /* ============================ TAB 4 — Portfolio ============================ */
@@ -1665,7 +1708,9 @@ function PortfolioTab({ data, setData }){
           <tbody>
             {positions.map(a => (
               <tr key={a.id}>
-                <td style={{fontWeight:600}}>{a.name}</td>
+                <td style={{fontWeight:600}}>
+                  <span style={{display:'inline-flex', alignItems:'center'}}><HoldingIcon asset={a}/>{a.name}</span>
+                </td>
                 <td className="muted">{instName(data, a.institutionId)}</td>
                 <td className="r num" style={{fontWeight:700}}>{fmt(a.value)}</td>
                 <td className="r">
