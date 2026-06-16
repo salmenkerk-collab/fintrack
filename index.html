@@ -402,6 +402,7 @@ function seedData(){
       grossReturn:7, inflation:2.5,
       box3FictitiousReturn:6.17, box3TaxRate:36, box3Exempt:57000,
       annualWithdrawal:30000, swr:4,
+      aowEnabled:false, aowAge:70, aowAnnualGross:13673, aowBuildPct:100,
     },
     income: { sven:3671, jointContribution:1000 },
     goals: [
@@ -475,6 +476,13 @@ function migrate(d){
     return a;
   });
   if (d.fireParams && !Array.isArray(d.fireParams.contributionSchedule)) d.fireParams.contributionSchedule = [];
+  if (d.fireParams){
+    const fpd = d.fireParams;
+    if (fpd.aowEnabled === undefined) fpd.aowEnabled = false;
+    if (fpd.aowAge === undefined) fpd.aowAge = 70;
+    if (fpd.aowAnnualGross === undefined) fpd.aowAnnualGross = 13673;
+    if (fpd.aowBuildPct === undefined) fpd.aowBuildPct = 100;
+  }
   if (!Array.isArray(d.goals)) d.goals = [{ id:'goal-car-2028', name:'New car', icon:'🚗', target:25000, targetDate:'2028-06', saved:0, monthly:0 }];
   /* one-time retro: tag already-imported broker funding (Flatex / DEGIRO / Trade Republic)
      and own-savings moves as transfers, so they drop out of spending & recurring-cost views */
@@ -882,7 +890,18 @@ function simulate(startNW, fp, grossPct, inflPct){
   const startYear = TODAY.getFullYear();
   const age0 = currentAge(fp.birthYear);
   const targetYear = startYear + (fp.targetAge - age0);
-  const fireNumber = fp.annualWithdrawal / (fp.swr/100);     // today's money
+  const fireFull = fp.annualWithdrawal / (fp.swr/100);       // today's money, portfolio-only
+  // AOW lowers the pot you need: its income offsets withdrawals from aowAge onward.
+  // Credit today = capital-equivalent of that income (A / SWR), discounted from aowAge
+  // back to the retirement year at the real (after-inflation) return.
+  let aowCredit = 0;
+  if (fp.aowEnabled){
+    const A = (Number(fp.aowAnnualGross) || 0) * (Number(fp.aowBuildPct) || 0) / 100;
+    const gapYears = Math.max(0, (Number(fp.aowAge) || 0) - fp.targetAge);
+    const realReturn = Math.max(0.001, (grossPct - inflPct) / 100);
+    aowCredit = (A / (fp.swr/100)) / Math.pow(1 + realReturn, gapYears);
+  }
+  const fireNumber = Math.max(0, fireFull - aowCredit);      // today's money
   const horizon = Math.max(fp.targetAge - age0, 1) + 12;     // sim a bit past target
 
   const rows = [];
@@ -921,7 +940,7 @@ function simulate(startNW, fp, grossPct, inflPct){
     yearsToFire: fireYear !== null ? fireYear - startYear : null,
     coastYear, coastAge: coastYear !== null ? age0 + (coastYear - startYear) : null,
     realAtTarget: atTarget ? atTarget.real : 0,
-    fireAtTarget, targetYear, age0, startYear,
+    fireAtTarget, targetYear, age0, startYear, fireFull, aowCredit,
   };
 }
 
@@ -1053,6 +1072,24 @@ function FireTab({ data, setData }){
         </div>
 
         <div className="mt" style={{borderTop:'1px solid var(--surface2)', paddingTop:14}}>
+          <label className="row" style={{gap:10, alignItems:'center', cursor:'pointer'}}>
+            <input type="checkbox" checked={!!fp.aowEnabled} onChange={e => setFP('aowEnabled', e.target.checked)}/>
+            <span className="k" style={{fontWeight:600}}>Include AOW (state pension) <span className="muted small">· lowers the pot you need, from your AOW age onward</span></span>
+          </label>
+          {fp.aowEnabled && (
+            <div className="form-grid" style={{marginTop:12}}>
+              <label className="fld">AOW start age
+                <NumInput value={fp.aowAge} onChange={v => setFP('aowAge', v)} width={80}/></label>
+              <label className="fld">AOW gross / year
+                <NumInput value={fp.aowAnnualGross} step={100} onChange={v => setFP('aowAnnualGross', v)} width={110} suffix="€/jr"/></label>
+              <label className="fld">Opbouw (residency %)
+                <NumInput value={fp.aowBuildPct} step={1} onChange={v => setFP('aowBuildPct', v)} width={80} suffix="%"/></label>
+            </div>
+          )}
+          {fp.aowEnabled && <div className="sub" style={{marginTop:6}}>Single AOW is ~€19.900/jr; samenwonend ~€13.700/jr per person (2026). Opbouw builds 2%/jaar you live in NL between 17 and AOW-age — set below 100% if you spent years abroad.</div>}
+        </div>
+
+        <div className="mt" style={{borderTop:'1px solid var(--surface2)', paddingTop:14}}>
           <div className="spread" style={{flexWrap:'wrap', gap:8, marginBottom:6}}>
             <span className="k" style={{fontWeight:600}}>Planned step-ups <span className="muted small">· invest more as your salary grows</span></span>
             <button className="btn" onClick={addStep}>+ Add step-up</button>
@@ -1133,6 +1170,8 @@ function FireTab({ data, setData }){
           <h3>FIRE number</h3>
           <div className="metric"><CountUp value={base.fireNumber} format={fmt0}/></div>
           <div className="sub">In today's money · {fmt0(base.fireAtTarget)} nominal at age {fp.targetAge}</div>
+          {fp.aowEnabled && <div className="sub" style={{marginTop:4}}>
+            <span className="muted">{fmt0(base.fireFull)} without AOW</span> · AOW covers {fmt0(base.fireFull - base.fireNumber)} from age {fp.aowAge}</div>}
         </div>
         <div className="card">
           <h3>Years remaining</h3>
@@ -1154,7 +1193,9 @@ function FireTab({ data, setData }){
       <div className="card" style={{padding:'10px 16px'}}>
         <span className="small muted">
           Coast FIRE reached at age <b className="num">{base.coastAge !== null ? base.coastAge : '—'}</b> — after that, contributions become optional. ·
-          AOW excluded — estimated eligibility age 70+ for 1997 birth year.
+          {fp.aowEnabled
+            ? <span> AOW included — {fmt0(fp.aowAnnualGross * fp.aowBuildPct / 100)}/jr from age {fp.aowAge} ({fp.aowBuildPct}% opbouw), lowering your target by {fmt0(base.fireFull - base.fireNumber)}.</span>
+            : <span> AOW excluded — toggle it on in Assumptions to fold in the state pension (est. age 70+ for 1997).</span>}
         </span>
       </div>
     </div>
