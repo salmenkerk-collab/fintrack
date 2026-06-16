@@ -6,9 +6,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Finance">
-<meta name="theme-color" content="#0f172a">
+<meta name="theme-color" content="#F3EDE2">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Hanken+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
 <title>Sven Finance</title>
 
 <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"
@@ -33,25 +36,36 @@
 
 <style>
   :root{
-    --bg:#0f172a; --surface:#1e293b; --surface2:#334155;
-    --text:#f8fafc; --muted:#94a3b8; --dim:#475569;
-    --blue:#3b82f6; --green:#4ade80; --orange:#fb923c;
-    --purple:#a78bfa; --red:#f87171; --yellow:#fbbf24;
+    --bg:#F3EDE2; --surface:#ECE4D6; --surface2:#D9CFBD;
+    --text:#211F1B; --muted:#5C574C; --dim:#8A8475;
+    --blue:#4A211C; --green:#5E6B3B; --orange:#9A6A34;
+    --purple:#988C6C; --red:#A2492B; --yellow:#B98A2E;
+    --gold:#988C6C; --rule:rgba(33,31,27,.14); --rule2:rgba(33,31,27,.08);
   }
   *{box-sizing:border-box; margin:0; padding:0;}
   html{ -webkit-text-size-adjust:100%; }
   body{
-    background:var(--bg); color:var(--text);
-    font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background:var(--bg); background-image:radial-gradient(1100px 620px at 82% -12%, rgba(255,255,255,.5), transparent 60%); background-attachment:fixed; color:var(--text);
+    font-family:'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; letter-spacing:.1px;
     font-size:15px; line-height:1.45;
     padding-top:env(safe-area-inset-top);
   }
   .app{ max-width:1180px; margin:0 auto; padding:16px 16px 64px; }
+  main{ animation: tabIn .45s ease both; }
+  @keyframes tabIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @keyframes secRise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+  @keyframes fadein{from{opacity:0}to{opacity:1}}
+  @keyframes pop{from{opacity:0;transform:scale(0)}to{opacity:1;transform:scale(1)}}
+  @keyframes drawStroke{from{stroke-dashoffset:92}to{stroke-dashoffset:0}}
+  @keyframes riseUp{from{transform:translateY(40px)}to{transform:translateY(0)}}
+  @keyframes rayPulse{0%,100%{opacity:1}50%{opacity:.5}}
 
   /* ---------- header ---------- */
   .header{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 0 14px; }
-  .brand{ font-size:17px; font-weight:700; letter-spacing:.2px; }
-  .brand span{ color:var(--blue); }
+  .brand{ display:flex; align-items:center; gap:11px; }
+  .brand .wm{ font-family:'Fraunces',Georgia,serif; font-weight:500; font-size:20px; letter-spacing:-.3px; line-height:1.05; }
+  .brand .wm .fin{ color:var(--blue); font-style:italic; }
+  .brand .tag{ font-size:9.5px; letter-spacing:2px; text-transform:uppercase; color:var(--gold); font-weight:600; margin-top:2px; }
   .liquid-pill{
     display:flex; flex-direction:column; align-items:flex-end; gap:1px;
     background:var(--surface); border:1px solid var(--surface2);
@@ -72,7 +86,7 @@
     border-bottom:2px solid transparent; white-space:nowrap;
   }
   .tab:hover{ color:var(--text); }
-  .tab.active{ color:var(--blue); border-bottom-color:var(--blue); }
+  .tab.active{ color:var(--blue); border-bottom-color:var(--gold); }
   .tab.settings{ margin-left:auto; font-size:16px; }
   .tab:focus-visible{ outline:2px solid var(--blue); outline-offset:-2px; border-radius:6px; }
 
@@ -82,13 +96,13 @@
   .grid2{ display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
   .layout-side{ display:grid; grid-template-columns:1fr 300px; gap:14px; align-items:start; }
   .card{
-    background:var(--surface); border:1px solid var(--surface2);
-    border-radius:14px; padding:16px;
+    background:var(--surface); border:1px solid var(--rule);
+    border-radius:16px; padding:16px;
   }
-  .card h3{ font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.7px; margin-bottom:8px; }
-  .card h2{ font-size:15px; font-weight:700; margin-bottom:10px; }
-  .metric{ font-size:26px; font-weight:800; font-variant-numeric:tabular-nums; }
-  .metric.primary{ font-size:32px; }
+  .card h3{ font-size:10.5px; font-weight:600; color:var(--gold); text-transform:uppercase; letter-spacing:2px; margin-bottom:8px; }
+  .card h2{ font-family:'Fraunces',Georgia,serif; font-size:18px; font-weight:500; letter-spacing:-.3px; margin-bottom:10px; }
+  .metric{ font-family:'Fraunces',Georgia,serif; font-size:28px; font-weight:500; letter-spacing:-.5px; font-variant-numeric:tabular-nums; }
+  .metric.primary{ font-size:40px; letter-spacing:-1px; }
   .metric.red{ color:var(--red); }
   .sub{ color:var(--muted); font-size:12.5px; margin-top:3px; }
   .pills-row{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
@@ -109,8 +123,8 @@
 
   /* ---------- tables ---------- */
   table{ width:100%; border-collapse:collapse; font-size:13.5px; }
-  th{ text-align:left; color:var(--muted); font-size:11.5px; text-transform:uppercase; letter-spacing:.6px; font-weight:600; padding:7px 8px; border-bottom:1px solid var(--surface2); }
-  td{ padding:8px; border-bottom:1px solid rgba(51,65,85,.55); vertical-align:middle; }
+  th{ text-align:left; color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:1.6px; font-weight:600; padding:7px 8px; border-bottom:1px solid var(--surface2); }
+  td{ padding:8px; border-bottom:1px solid rgba(33,31,27,.12); vertical-align:middle; }
   tr:last-child td{ border-bottom:none; }
   td.r, th.r{ text-align:right; }
 
@@ -133,7 +147,7 @@
   }
   .btn:hover{ border-color:var(--dim); }
   .btn-blue{ background:var(--blue); border-color:var(--blue); color:#fff; }
-  .btn-blue:hover{ background:#2f74e0; }
+  .btn-blue:hover{ background:#4A211C; }
   .btn-green{ background:rgba(74,222,128,.15); border-color:rgba(74,222,128,.4); color:var(--green); }
   .btn-icon{ background:none; border:none; cursor:pointer; font-size:14px; padding:3px 5px; border-radius:6px; opacity:.75; }
   .btn-icon:hover{ opacity:1; background:var(--surface2); }
@@ -182,7 +196,7 @@
   .recharts-tooltip-label, .recharts-tooltip-item{ color:var(--text) !important; font-size:12.5px !important; }
 
   /* ---- modal / CSV import ---- */
-  .modal-back{position:fixed;inset:0;background:rgba(2,6,23,.8);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow-y:auto;}
+  .modal-back{position:fixed;inset:0;background:rgba(33,31,27,.5);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow-y:auto;}
   .modal{background:var(--surface);border:1px solid var(--surface2);border-radius:16px;max-width:1080px;width:100%;padding:18px;margin-bottom:40px;}
   .review-wrap{max-height:50vh;overflow:auto;border:1px solid var(--surface2);border-radius:10px;}
   .review-wrap table{font-size:12.5px;}
@@ -192,16 +206,16 @@
   .tx-sug{box-shadow:inset 3px 0 0 var(--yellow);}
   .tx-none{box-shadow:inset 3px 0 0 var(--red);}
   .tx-transfer{opacity:.55;}
-  .tx-active{background:rgba(59,130,246,.12);}
-  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--dim);border-radius:10px;padding:10px 16px;font-size:13px;z-index:60;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:90vw;}
+  .tx-active{background:rgba(74,33,28,.10);}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--surface2);border:1px solid var(--dim);border-radius:10px;padding:10px 16px;font-size:13px;z-index:60;box-shadow:0 8px 30px rgba(33,31,27,.16);max-width:90vw;}
   .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);background:var(--bg);border-radius:8px;padding:8px 12px;}
   .legend b{color:var(--text);background:var(--surface2);border-radius:4px;padding:0 5px;margin-right:2px;}
   /* ---- settings ---- */
-  .cat-row{position:relative;display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid rgba(51,65,85,.5);}
+  .cat-row{position:relative;display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid rgba(33,31,27,.12);}
   .drag-row{cursor:grab;}
   .drag-over{outline:2px dashed var(--blue);outline-offset:-2px;border-radius:8px;}
-  .swatch{width:18px;height:18px;border-radius:6px;border:1px solid rgba(255,255,255,.2);cursor:pointer;flex:none;}
-  .pop{position:absolute;z-index:30;background:var(--surface);border:1px solid var(--surface2);border-radius:10px;padding:8px;display:grid;grid-template-columns:repeat(7,28px);gap:4px;box-shadow:0 10px 30px rgba(0,0,0,.5);}
+  .swatch{width:18px;height:18px;border-radius:6px;border:1px solid rgba(33,31,27,.18);cursor:pointer;flex:none;}
+  .pop{position:absolute;z-index:30;background:var(--surface);border:1px solid var(--surface2);border-radius:10px;padding:8px;display:grid;grid-template-columns:repeat(7,28px);gap:4px;box-shadow:0 10px 30px rgba(33,31,27,.18);}
   .pop button{font-size:16px;background:none;border:none;cursor:pointer;border-radius:6px;padding:2px;line-height:1;}
   .pop button:hover{background:var(--surface2);}
   @media (max-width:900px){
@@ -209,7 +223,7 @@
   }
   @media (max-width:640px){
     .grid3, .grid2{ grid-template-columns:1fr; }
-    .metric.primary{ font-size:27px; }
+    .metric.primary{ font-size:32px; }
     .liquid-pill{ padding:6px 10px; }
     .header{ flex-wrap:wrap; }
   }
@@ -242,10 +256,10 @@ const pct1 = v => new Intl.NumberFormat('nl-NL', { maximumFractionDigits:1 }).fo
 const uid = () => Math.random().toString(36).slice(2,10);
 
 const ASSET_CATS = [
-  { id:'stocks',   name:'Stocks',   icon:'📈', color:'#3b82f6' },
-  { id:'crypto',   name:'Crypto',   icon:'🪙', color:'#fb923c' },
-  { id:'property', name:'Property', icon:'🏠', color:'#a78bfa' },
-  { id:'savings',  name:'Savings',  icon:'🏦', color:'#4ade80' },
+  { id:'stocks',   name:'Stocks',   icon:'📈', color:'#4A211C' },
+  { id:'crypto',   name:'Crypto',   icon:'🪙', color:'#9A6A34' },
+  { id:'property', name:'Property', icon:'🏠', color:'#988C6C' },
+  { id:'savings',  name:'Savings',  icon:'🏦', color:'#5E6B3B' },
 ];
 const catById = id => ASSET_CATS.find(c => c.id === id) || ASSET_CATS[0];
 
@@ -283,15 +297,15 @@ const instName = (data, id) =>
 /* Budget / CSV category taxonomy — mirrors ING's own categories (single source of truth,
    referenced everywhere by id so renaming in Settings never breaks references). */
 const SEED_CATEGORIES = [
-  { id:'vaste-lasten',     name:'Vaste lasten',                         icon:'🏠', color:'#3b82f6', type:'fixed',    order:0 },
-  { id:'boodschappen',     name:'Boodschappen & huishouden',            icon:'🛒', color:'#4ade80', type:'variable', order:1 },
-  { id:'restaurants-bars', name:'Restaurants & bars',                   icon:'🍽', color:'#fb923c', type:'variable', order:2 },
-  { id:'vrije-tijd',       name:'Vrije tijd',                           icon:'🎮', color:'#a78bfa', type:'variable', order:3 },
-  { id:'winkelen',         name:'Winkelen',                             icon:'🛍', color:'#ec4899', type:'variable', order:4 },
-  { id:'gezondheid',       name:'Gezondheid & persoonlijke verzorging', icon:'💊', color:'#f87171', type:'variable', order:5 },
-  { id:'transport',        name:'Transport',                            icon:'🚗', color:'#fbbf24', type:'variable', order:6 },
-  { id:'overig',           name:'Overig',                               icon:'💼', color:'#94a3b8', type:'variable', order:7 },
-  { id:'inkomsten',        name:'Inkomsten',                            icon:'💰', color:'#4ade80', type:'income',   order:8 },
+  { id:'vaste-lasten',     name:'Vaste lasten',                         icon:'🏠', color:'#4A211C', type:'fixed',    order:0 },
+  { id:'boodschappen',     name:'Boodschappen & huishouden',            icon:'🛒', color:'#5E6B3B', type:'variable', order:1 },
+  { id:'restaurants-bars', name:'Restaurants & bars',                   icon:'🍽', color:'#9A6A34', type:'variable', order:2 },
+  { id:'vrije-tijd',       name:'Vrije tijd',                           icon:'🎮', color:'#988C6C', type:'variable', order:3 },
+  { id:'winkelen',         name:'Winkelen',                             icon:'🛍', color:'#8C5A6B', type:'variable', order:4 },
+  { id:'gezondheid',       name:'Gezondheid & persoonlijke verzorging', icon:'💊', color:'#A2492B', type:'variable', order:5 },
+  { id:'transport',        name:'Transport',                            icon:'🚗', color:'#B98A2E', type:'variable', order:6 },
+  { id:'overig',           name:'Overig',                               icon:'💼', color:'#5C574C', type:'variable', order:7 },
+  { id:'inkomsten',        name:'Inkomsten',                            icon:'💰', color:'#5E6B3B', type:'income',   order:8 },
 ];
 const SEED_IBANS = [
   { id:'ib1', iban:'NL00 INGB 0000 0000 01', owner:'Sven',      type:'personal' },
@@ -938,12 +952,12 @@ function FireTab({ data, setData }){
         </div>
         <div style={{position:'relative', height:14, background:'var(--bg)', borderRadius:8, marginTop:14}}>
           <div style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
-            background:'linear-gradient(90deg,#3b82f6,#4ade80)', borderRadius:8, transition:'width .4s'}}/>
-          <div style={{position:'absolute', left:coastPct+'%', top:-5, height:24, width:2, background:'#fbbf24'}} title="Coast FIRE point"></div>
+            background:'linear-gradient(90deg,#4A211C,#5E6B3B)', borderRadius:8, transition:'width .4s'}}/>
+          <div style={{position:'absolute', left:coastPct+'%', top:-5, height:24, width:2, background:'#B98A2E'}} title="Coast FIRE point"></div>
         </div>
         <div className="spread" style={{marginTop:6}}>
           <span className="small dim">€0</span>
-          <span className="small" style={{color:'#fbbf24'}}>Coast FI · {fmt0(coastNumberToday)}</span>
+          <span className="small" style={{color:'#B98A2E'}}>Coast FI · {fmt0(coastNumberToday)}</span>
           <span className="small dim">{fmt0(base.fireNumber)}</span>
         </div>
         <div className="grid2 mt">
@@ -1036,17 +1050,17 @@ function FireTab({ data, setData }){
         <div style={{width:'100%', height:300}}>
           <ResponsiveContainer>
             <AreaChart data={chartRows} margin={{top:8, right:8, left:8, bottom:0}}>
-              <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
-              <XAxis dataKey="year" tick={{fill:'#94a3b8', fontSize:12}}/>
-              <YAxis tick={{fill:'#94a3b8', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
+              <CartesianGrid stroke="#D9CFBD" strokeDasharray="3 3"/>
+              <XAxis dataKey="year" tick={{fill:'#5C574C', fontSize:12}}/>
+              <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
               <Tooltip formatter={(v,n) => [fmt0(v), n]}/>
-              <Area type="monotone" dataKey="nominal" name="Nominal" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.25} strokeWidth={2}/>
-              <Area type="monotone" dataKey="real" name="Real (today's €)" stroke="#4ade80" fill="#4ade80" fillOpacity={0.18} strokeWidth={2}/>
-              {base.coastYear && <ReferenceLine x={base.coastYear} stroke="#fbbf24" strokeDasharray="4 4"
-                 label={{value:'Coast FIRE', fill:'#fbbf24', fontSize:11, position:'insideTopLeft'}}/>}
+              <Area type="monotone" dataKey="nominal" name="Nominal" stroke="#4A211C" fill="#4A211C" fillOpacity={0.25} strokeWidth={2}/>
+              <Area type="monotone" dataKey="real" name="Real (today's €)" stroke="#5E6B3B" fill="#5E6B3B" fillOpacity={0.18} strokeWidth={2}/>
+              {base.coastYear && <ReferenceLine x={base.coastYear} stroke="#B98A2E" strokeDasharray="4 4"
+                 label={{value:'Coast FIRE', fill:'#B98A2E', fontSize:11, position:'insideTopLeft'}}/>}
               {base.fireYear && base.fireYear <= base.targetYear &&
-                <ReferenceLine x={base.fireYear} stroke="#4ade80" strokeDasharray="4 4"
-                 label={{value:'FIRE', fill:'#4ade80', fontSize:11, position:'insideTopRight'}}/>}
+                <ReferenceLine x={base.fireYear} stroke="#5E6B3B" strokeDasharray="4 4"
+                 label={{value:'FIRE', fill:'#5E6B3B', fontSize:11, position:'insideTopRight'}}/>}
               <Legend wrapperStyle={{fontSize:12}}/>
             </AreaChart>
           </ResponsiveContainer>
@@ -1058,12 +1072,12 @@ function FireTab({ data, setData }){
         <div style={{width:'100%', height:260}}>
           <ResponsiveContainer>
             <BarChart data={chartRows} margin={{top:8, right:8, left:8, bottom:0}}>
-              <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
-              <XAxis dataKey="year" tick={{fill:'#94a3b8', fontSize:12}}/>
-              <YAxis tick={{fill:'#94a3b8', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
+              <CartesianGrid stroke="#D9CFBD" strokeDasharray="3 3"/>
+              <XAxis dataKey="year" tick={{fill:'#5C574C', fontSize:12}}/>
+              <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
               <Tooltip formatter={(v,n) => [fmt0(v), n]}/>
-              <Bar dataKey="contrib" name="Contributions" stackId="a" fill="#3b82f6"/>
-              <Bar dataKey="growth" name="Market growth" stackId="a" fill="#4ade80"/>
+              <Bar dataKey="contrib" name="Contributions" stackId="a" fill="#4A211C"/>
+              <Bar dataKey="growth" name="Market growth" stackId="a" fill="#5E6B3B"/>
               <Legend wrapperStyle={{fontSize:12}}/>
             </BarChart>
           </ResponsiveContainer>
@@ -1117,9 +1131,9 @@ const prevMonthKey = mk => {
 };
 const budgetCats = data => [...(data.categories || [])].sort((a,b) => (a.order||0) - (b.order||0));
 const catOf = (data, id) => {
-  if (id === 'transfer') return { id:'transfer', name:'Overboeking (transfer)', icon:'🔁', color:'#475569', type:'transfer' };
+  if (id === 'transfer') return { id:'transfer', name:'Overboeking (transfer)', icon:'🔁', color:'#8A8475', type:'transfer' };
   return (data.categories || []).find(c => c.id === id)
-      || { id, name:'Onbekend', icon:'❓', color:'#475569', type:'variable' };
+      || { id, name:'Onbekend', icon:'❓', color:'#8A8475', type:'variable' };
 };
 const monthlyEq = c =>
   c.frequency === 'quarterly' ? c.amount / 3 :
@@ -1458,9 +1472,9 @@ function BudgetTab({ data, setData }){
                 <div style={{width:'100%', height:200}}>
                   <ResponsiveContainer>
                     <BarChart data={catTotals} margin={{top:8, right:8, left:8, bottom:0}}>
-                      <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
-                      <XAxis dataKey="name" tick={{fill:'#94a3b8', fontSize:11}}/>
-                      <YAxis tick={{fill:'#94a3b8', fontSize:12}} tickFormatter={v => '€' + v} width={50}/>
+                      <CartesianGrid stroke="#D9CFBD" strokeDasharray="3 3"/>
+                      <XAxis dataKey="name" tick={{fill:'#5C574C', fontSize:11}}/>
+                      <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + v} width={50}/>
                       <Tooltip formatter={v => fmt(v)}/>
                       <Bar dataKey="value" name="This month" radius={[5,5,0,0]}>
                         {catTotals.map((c,i) => <Cell key={i} fill={c.fill}/>)}
@@ -1582,7 +1596,7 @@ function PortfolioTab({ data, setData }){
           )}
           {cryptoPct > 10 && (
             <div className="small">
-              <span className="badge" style={{background:'rgba(148,163,184,.15)', color:'var(--muted)'}}>Note</span>{' '}
+              <span className="badge" style={{background:'rgba(33,31,27,.10)', color:'var(--muted)'}}>Note</span>{' '}
               <span className="muted">Crypto allocation: {pct1(cryptoPct)} of investment portfolio.</span>
             </div>
           )}
@@ -1787,13 +1801,13 @@ function PropertyTab({ data, setData }){
         <div style={{width:'100%', height:290}}>
           <ResponsiveContainer>
             <AreaChart data={chartRows} margin={{top:8, right:8, left:8, bottom:0}}>
-              <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
-              <XAxis dataKey="year" tick={{fill:'#94a3b8', fontSize:12}}/>
-              <YAxis tick={{fill:'#94a3b8', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={58} domain={[0, 'auto']}/>
+              <CartesianGrid stroke="#D9CFBD" strokeDasharray="3 3"/>
+              <XAxis dataKey="year" tick={{fill:'#5C574C', fontSize:12}}/>
+              <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={58} domain={[0, 'auto']}/>
               <Tooltip formatter={(v,n) => [fmt0(v), n]}/>
-              <Area type="monotone" dataKey="value" name="Property value" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.15} strokeWidth={2}/>
-              <Area type="monotone" dataKey="mortgage" name="Mortgage balance" stroke="#f87171" fill="#f87171" fillOpacity={0.18} strokeWidth={2}/>
-              <Area type="monotone" dataKey="equity" name="Equity" stroke="#4ade80" fillOpacity={0} strokeWidth={2} strokeDasharray="5 3"/>
+              <Area type="monotone" dataKey="value" name="Property value" stroke="#988C6C" fill="#988C6C" fillOpacity={0.15} strokeWidth={2}/>
+              <Area type="monotone" dataKey="mortgage" name="Mortgage balance" stroke="#A2492B" fill="#A2492B" fillOpacity={0.18} strokeWidth={2}/>
+              <Area type="monotone" dataKey="equity" name="Equity" stroke="#5E6B3B" fillOpacity={0} strokeWidth={2} strokeDasharray="5 3"/>
               <Legend wrapperStyle={{fontSize:12}}/>
             </AreaChart>
           </ResponsiveContainer>
@@ -1993,12 +2007,12 @@ function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap
             <div style={{width:'100%', height:280}}>
               <ResponsiveContainer>
                 <AreaChart data={rows} margin={{top:8, right:8, left:8, bottom:0}}>
-                  <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
-                  <XAxis dataKey="month" tick={{fill:'#94a3b8', fontSize:11}}/>
-                  <YAxis tick={{fill:'#94a3b8', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
+                  <CartesianGrid stroke="#D9CFBD" strokeDasharray="3 3"/>
+                  <XAxis dataKey="month" tick={{fill:'#5C574C', fontSize:11}}/>
+                  <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
                   <Tooltip formatter={(v,n) => [fmt0(v), n]}/>
-                  <Area type="monotone" dataKey="liquid" name="Actual liquid NW" stroke="#4ade80" fill="#4ade80" fillOpacity={0.22} strokeWidth={2}/>
-                  <Area type="monotone" dataKey="expected" name="Expected (plan)" stroke="#94a3b8" fillOpacity={0} strokeWidth={2} strokeDasharray="6 4"/>
+                  <Area type="monotone" dataKey="liquid" name="Actual liquid NW" stroke="#5E6B3B" fill="#5E6B3B" fillOpacity={0.22} strokeWidth={2}/>
+                  <Area type="monotone" dataKey="expected" name="Expected (plan)" stroke="#5C574C" fillOpacity={0} strokeWidth={2} strokeDasharray="6 4"/>
                   <Legend wrapperStyle={{fontSize:12}}/>
                 </AreaChart>
               </ResponsiveContainer>
@@ -2011,13 +2025,13 @@ function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap
             <div style={{width:'100%', height:280}}>
               <ResponsiveContainer>
                 <AreaChart data={rows} margin={{top:8, right:8, left:8, bottom:0}}>
-                  <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
-                  <XAxis dataKey="month" tick={{fill:'#94a3b8', fontSize:11}}/>
-                  <YAxis tick={{fill:'#94a3b8', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
+                  <CartesianGrid stroke="#D9CFBD" strokeDasharray="3 3"/>
+                  <XAxis dataKey="month" tick={{fill:'#5C574C', fontSize:11}}/>
+                  <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
                   <Tooltip formatter={(v,n) => [fmt0(v), n]}/>
-                  <Area type="monotone" dataKey="invested" name="Invested (stocks + crypto)" stackId="1" stroke="#4ade80" fill="#4ade80" fillOpacity={0.45}/>
-                  <Area type="monotone" dataKey="savings" name="Cash savings" stackId="1" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.45}/>
-                  <Area type="monotone" dataKey="prop" name="Property equity" stackId="1" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.4}/>
+                  <Area type="monotone" dataKey="invested" name="Invested (stocks + crypto)" stackId="1" stroke="#5E6B3B" fill="#5E6B3B" fillOpacity={0.45}/>
+                  <Area type="monotone" dataKey="savings" name="Cash savings" stackId="1" stroke="#988C6C" fill="#988C6C" fillOpacity={0.45}/>
+                  <Area type="monotone" dataKey="prop" name="Property equity" stackId="1" stroke="#4A211C" fill="#4A211C" fillOpacity={0.4}/>
                   <Legend wrapperStyle={{fontSize:12}}/>
                 </AreaChart>
               </ResponsiveContainer>
@@ -2029,15 +2043,15 @@ function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap
             <div style={{width:'100%', height:240}}>
               <ResponsiveContainer>
                 <BarChart data={deltas} margin={{top:8, right:8, left:8, bottom:0}}>
-                  <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
-                  <XAxis dataKey="month" tick={{fill:'#94a3b8', fontSize:11}}/>
-                  <YAxis tick={{fill:'#94a3b8', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
+                  <CartesianGrid stroke="#D9CFBD" strokeDasharray="3 3"/>
+                  <XAxis dataKey="month" tick={{fill:'#5C574C', fontSize:11}}/>
+                  <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
                   <Tooltip formatter={v => fmt0(v)}/>
-                  <ReferenceLine y={refExpected} stroke="#fbbf24" strokeDasharray="4 4"
-                    label={{value:'expected', fill:'#fbbf24', fontSize:11, position:'insideTopRight'}}/>
-                  <ReferenceLine y={0} stroke="#475569"/>
+                  <ReferenceLine y={refExpected} stroke="#B98A2E" strokeDasharray="4 4"
+                    label={{value:'expected', fill:'#B98A2E', fontSize:11, position:'insideTopRight'}}/>
+                  <ReferenceLine y={0} stroke="#8A8475"/>
                   <Bar dataKey="delta" name="Δ liquid NW" radius={[4,4,0,0]}>
-                    {deltas.map((d,i) => <Cell key={i} fill={d.delta >= 0 ? '#4ade80' : '#f87171'}/>)}
+                    {deltas.map((d,i) => <Cell key={i} fill={d.delta >= 0 ? '#5E6B3B' : '#A2492B'}/>)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -2623,14 +2637,14 @@ function ImportModal({ data, onClose, onCommit }){
 
 /* ============================ TAB 7 — Settings ============================ */
 const EMOJI_OPTIONS = ['🏠','🛒','🍽','🚗','💊','🎮','🛍','💼','✈️','⚡','📺','💪','🎁','💰'];
-const COLOR_OPTIONS = ['#4ade80','#fb923c','#a78bfa','#f87171','#fbbf24','#3b82f6','#ec4899','#94a3b8'];
+const COLOR_OPTIONS = ['#5E6B3B','#9A6A34','#988C6C','#A2492B','#B98A2E','#4A211C','#8C5A6B','#5C574C'];
 const slugify = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 function SettingsTab({ data, setData, sync }){
   const [pop, setPop] = useState(null);                 // { id, kind:'icon'|'color' }
   const dragIdx = useRef(null);
   const [dragOver, setDragOver] = useState(null);
-  const [catForm, setCatForm] = useState({ name:'', icon:'🛒', color:'#4ade80', type:'variable' });
+  const [catForm, setCatForm] = useState({ name:'', icon:'🛒', color:'#5E6B3B', type:'variable' });
   const [costForm, setCostForm] = useState({ name:'', amount:'', categoryId:'vaste-lasten', frequency:'monthly', note:'' });
   const [instForm, setInstForm] = useState({ name:'', type:'broker' });
   const [ibanForm, setIbanForm] = useState({ iban:'', owner:'', type:'personal' });
@@ -2652,7 +2666,7 @@ function SettingsTab({ data, setData, sync }){
     let id = slugify(catForm.name) || uid();
     if (data.categories.some(c => c.id === id)) id = id + '-' + uid().slice(0,4);
     setCats([...data.categories, { ...catForm, id, order: data.categories.length }]);
-    setCatForm({ name:'', icon:'🛒', color:'#4ade80', type:'variable' });
+    setCatForm({ name:'', icon:'🛒', color:'#5E6B3B', type:'variable' });
   };
   const onDrop = idx => {
     const from = dragIdx.current;
@@ -3276,9 +3290,9 @@ function SpendingInsights({ data }){
             <div style={{width:'100%', height:260}}>
               <ResponsiveContainer>
                 <BarChart data={rows} margin={{top:8, right:8, left:8, bottom:0}}>
-                  <CartesianGrid stroke="#334155" strokeDasharray="3 3"/>
-                  <XAxis dataKey="month" tick={{fill:'#94a3b8', fontSize:11}}/>
-                  <YAxis tick={{fill:'#94a3b8', fontSize:12}} tickFormatter={v => '€' + Math.round(v)} width={55}/>
+                  <CartesianGrid stroke="#D9CFBD" strokeDasharray="3 3"/>
+                  <XAxis dataKey="month" tick={{fill:'#5C574C', fontSize:11}}/>
+                  <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + Math.round(v)} width={55}/>
                   <Tooltip formatter={v => fmt(v)}/>
                   {cats.map(c => <Bar key={c.id} dataKey={c.id} name={c.name} stackId="s" fill={c.color}/>)}
                   <Legend wrapperStyle={{fontSize:11}}/>
@@ -3456,7 +3470,7 @@ function GoalsTab({ data, setData }){
 
             <div style={{position:'relative', height:12, background:'var(--bg)', borderRadius:8, marginTop:12}}>
               <div style={{position:'absolute', left:0, top:0, height:'100%', width:c.pct + '%',
-                background: c.reached ? 'var(--green)' : 'linear-gradient(90deg,#3b82f6,#4ade80)', borderRadius:8, transition:'width .4s'}}></div>
+                background: c.reached ? 'var(--green)' : 'linear-gradient(90deg,#4A211C,#5E6B3B)', borderRadius:8, transition:'width .4s'}}></div>
             </div>
             <div className="spread" style={{marginTop:6}}>
               <span className="small num green">{fmt0(g.saved || 0)} saved</span>
@@ -3676,7 +3690,7 @@ function CloudSyncPanel({ sync }){
         <React.Fragment>
           <div className="sub mb">Paste your Firebase <b>firebaseConfig</b> block (Firebase console → Project settings → Your apps). It stays on this device and is never part of your synced data.</div>
           <textarea value={txt} onChange={e => setTxt(e.target.value)} placeholder="Paste the firebaseConfig block here…"
-            style={{width:'100%', minHeight:120, background:'#0f172a', color:'#e2e8f0', border:'1px solid #334155', borderRadius:8, padding:10, fontFamily:'monospace', fontSize:12}}/>
+            style={{width:'100%', minHeight:120, background:'#F3EDE2', color:'#211F1B', border:'1px solid #D9CFBD', borderRadius:8, padding:10, fontFamily:'monospace', fontSize:12}}/>
           <div className="row mt"><button className="btn btn-blue" onClick={() => { if (s.saveConfig(txt)) setTxt(''); }}>Save config</button></div>
           {s.error && <div className="sub red mt">{s.error}</div>}
         </React.Fragment>}
@@ -3753,7 +3767,22 @@ function FinanceModel(){
   return (
     <div className="app">
       <div className="header">
-        <div className="brand">Sven <span>Finance</span></div>
+        <div className="brand">
+          <svg width="30" height="30" viewBox="0 0 120 120" aria-hidden="true" style={{flexShrink:0}}>
+            <defs><clipPath id="dawnHdr"><rect x="0" y="0" width="120" height="74"/></clipPath></defs>
+            <g style={{animation:'rayPulse 6s ease-in-out infinite 2s'}}>
+              <line x1="60" y1="14" x2="60" y2="26" stroke="#988C6C" strokeWidth="3" strokeLinecap="round" style={{animation:'fadein .5s ease both .9s'}}/>
+              <line x1="30" y1="26" x2="39" y2="36" stroke="#988C6C" strokeWidth="3" strokeLinecap="round" style={{animation:'fadein .5s ease both 1s'}}/>
+              <line x1="90" y1="26" x2="81" y2="36" stroke="#988C6C" strokeWidth="3" strokeLinecap="round" style={{animation:'fadein .5s ease both 1s'}}/>
+            </g>
+            <g clipPath="url(#dawnHdr)"><circle cx="60" cy="74" r="25" fill="#4A211C" style={{animation:'riseUp .95s cubic-bezier(.2,.8,.2,1) both .4s'}}/></g>
+            <line x1="14" y1="74" x2="106" y2="74" stroke="#988C6C" strokeWidth="3.4" strokeLinecap="round" strokeDasharray="92" style={{animation:'drawStroke .8s ease both .25s'}}/>
+          </svg>
+          <div style={{display:'flex', flexDirection:'column'}}>
+            <span className="wm">Sven <span className="fin">Finance</span></span>
+            <span className="tag">Private-wealth almanac</span>
+          </div>
+        </div>
         <HeaderPill liquid={liquid} snapshots={data.snapshots}/>
       </div>
 
@@ -3766,7 +3795,7 @@ function FinanceModel(){
         ))}
       </nav>
 
-      <main>
+      <main key={tab}>
         {tab === 'networth' && <NetWorthTab data={data} setData={setData}/>}
         {tab === 'fire'     && <FireTab data={data} setData={setData}/>}
         {tab === 'budget'   && <BudgetTab data={data} setData={setData}/>}
@@ -3796,10 +3825,10 @@ window.addEventListener('load', function(){
       : (window.__bootErr ? ('Startup error: ' + window.__bootErr) : 'The app did not start.');
     if (el) el.innerHTML =
       '<div style="max-width:560px;margin:64px auto;padding:24px;font-family:-apple-system,Segoe UI,sans-serif;'
-      + 'background:#1e293b;border:1px solid #334155;border-radius:14px;color:#f8fafc;line-height:1.5">'
+      + 'background:#ECE4D6;border:1px solid #D9CFBD;border-radius:14px;color:#211F1B;line-height:1.5">'
       + '<div style="font-size:18px;font-weight:700;margin-bottom:8px">Finance dashboard could not start</div>'
-      + '<div style="color:#94a3b8;font-size:14px">' + msg + '</div>'
-      + '<div style="color:#475569;font-size:12px;margin-top:14px">If this is the in-app preview, open the deployed '
+      + '<div style="color:#5C574C;font-size:14px">' + msg + '</div>'
+      + '<div style="color:#8A8475;font-size:12px;margin-top:14px">If this is the in-app preview, open the deployed '
       + 'GitHub Pages version instead — external chart/React libraries load fine there.</div></div>';
   }, 1200);
 });
