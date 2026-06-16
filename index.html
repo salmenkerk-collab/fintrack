@@ -52,7 +52,12 @@
   }
   .app{ max-width:1180px; margin:0 auto; padding:16px 16px 64px; }
   main{ animation: tabIn .45s ease both; }
-  @keyframes tabIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @keyframes tabIn{from{opacity:0}to{opacity:1}}
+  main .card{ animation: secRise .5s ease both; }
+  .grid2 > .card:nth-child(2){ animation-delay:.07s }
+  .grid3 > .card:nth-child(2){ animation-delay:.07s } .grid3 > .card:nth-child(3){ animation-delay:.14s }
+  .stack > .card:nth-child(2){ animation-delay:.06s } .stack > .card:nth-child(3){ animation-delay:.12s }
+  .stack > .card:nth-child(4){ animation-delay:.18s } .stack > .card:nth-child(5){ animation-delay:.24s } .stack > .card:nth-child(6){ animation-delay:.30s }
   @keyframes secRise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
   @keyframes fadein{from{opacity:0}to{opacity:1}}
   @keyframes pop{from{opacity:0;transform:scale(0)}to{opacity:1;transform:scale(1)}}
@@ -252,6 +257,32 @@ const eur0 = new Intl.NumberFormat('nl-NL', { style:'currency', currency:'EUR', 
 const fmt  = v => eur.format(v);
 const fmt0 = v => eur0.format(v);
 const pct1 = v => new Intl.NumberFormat('nl-NL', { maximumFractionDigits:1 }).format(v) + '%';
+
+function CountUp({ value, format, dur }){
+  const [disp, setDisp] = useState(typeof value === 'number' && isFinite(value) ? 0 : value);
+  const fromRef = useRef(0);
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const start = mountedRef.current ? fromRef.current : 0;
+    mountedRef.current = true;
+    if (reduce || typeof value !== 'number' || !isFinite(value)) { fromRef.current = value; setDisp(value); return; }
+    const to = value, d = dur || 1000;
+    let t0 = null, raf;
+    const step = (ts) => {
+      if (t0 === null) t0 = ts;
+      const pr = Math.min((ts - t0) / d, 1);
+      const e = 1 - Math.pow(1 - pr, 3);
+      const cur = start + (to - start) * e;
+      fromRef.current = cur; setDisp(cur);
+      if (pr < 1) raf = requestAnimationFrame(step);
+      else { fromRef.current = to; setDisp(to); }
+    };
+    raf = requestAnimationFrame(step);
+    return () => { if (raf) cancelAnimationFrame(raf); };
+  }, [value]);
+  return format ? format(disp) : Math.round(disp);
+}
 
 const uid = () => Math.random().toString(36).slice(2,10);
 
@@ -483,7 +514,7 @@ function HeaderPill({ liquid, snapshots }){
   return (
     <div className="liquid-pill" title="Stocks + crypto + savings. Delta vs last snapshot in History.">
       <span className="lp-label">Liquid NW</span>
-      <span className="lp-main"><b>{fmt0(liquid)}</b></span>
+      <span className="lp-main"><b><CountUp value={liquid} format={fmt0}/></b></span>
       <span className={'lp-delta ' + cls}>
         {delta
           ? arrow + ' ' + (delta.d >= 0 ? '+' : '−') + fmt0(Math.abs(delta.d)) + ' (' + (delta.d >= 0 ? '+' : '') + pct1(delta.p) + ')'
@@ -605,17 +636,17 @@ function NetWorthTab({ data, setData }){
       <div className="grid3">
         <div className="card">
           <h3>Net worth</h3>
-          <div className="metric primary">{fmt0(netWorth)}</div>
+          <div className="metric primary"><CountUp value={netWorth} format={fmt0}/></div>
           <div className="sub">Gross assets − liabilities</div>
         </div>
         <div className="card">
           <h3>Gross assets</h3>
-          <div className="metric">{fmt0(gross)}</div>
+          <div className="metric"><CountUp value={gross} format={fmt0}/></div>
           <div className="sub">{assets.length} holdings across {Object.keys(instTotals).length} institutions</div>
         </div>
         <div className="card">
           <h3>Debt</h3>
-          <div className="metric red">{fmt0(debt)}</div>
+          <div className="metric red"><CountUp value={debt} format={fmt0}/></div>
           <div className="sub">Hypotheek ING</div>
         </div>
       </div>
@@ -945,7 +976,7 @@ function FireTab({ data, setData }){
         <h2>Progress to financial independence</h2>
         <div className="spread" style={{alignItems:'flex-end', flexWrap:'wrap', gap:8}}>
           <div>
-            <div className="metric green" style={{marginBottom:0}}>{pct1(pctToFI)}</div>
+            <div className="metric green" style={{marginBottom:0}}><CountUp value={pctToFI} format={pct1}/></div>
             <div className="sub">of your {fmt0(base.fireNumber)} FIRE number (today's €)</div>
           </div>
           <div className="num muted">{fmt0(liquid)} / {fmt0(base.fireNumber)}</div>
@@ -1088,7 +1119,7 @@ function FireTab({ data, setData }){
       <div className="grid3">
         <div className="card">
           <h3>FIRE number</h3>
-          <div className="metric">{fmt0(base.fireNumber)}</div>
+          <div className="metric"><CountUp value={base.fireNumber} format={fmt0}/></div>
           <div className="sub">In today's money · {fmt0(base.fireAtTarget)} nominal at age {fp.targetAge}</div>
         </div>
         <div className="card">
@@ -1547,7 +1578,7 @@ function PortfolioTab({ data, setData }){
   const BrokerCard = ({ title, total, count, unit }) => (
     <div className="card">
       <h3>{title}</h3>
-      <div className="metric">{fmt0(total)}</div>
+      <div className="metric"><CountUp value={total} format={fmt0}/></div>
       <div className="sub">{count} {unit}</div>
     </div>
   );
@@ -1785,7 +1816,7 @@ function PropertyTab({ data, setData }){
       </div>
 
       <div className="grid3">
-        <div className="card"><h3>Current equity</h3><div className="metric green">{fmt0(equity)}</div></div>
+        <div className="card"><h3>Current equity</h3><div className="metric green"><CountUp value={equity} format={fmt0}/></div></div>
         <div className="card">
           <h3>Loan-to-value</h3><div className="metric">{pct1(ltv)}</div>
           <div style={{height:8, background:'var(--bg)', borderRadius:6, marginTop:10, overflow:'hidden'}}>
