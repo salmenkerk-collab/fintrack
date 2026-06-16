@@ -2222,22 +2222,22 @@ function fingerprint(desc){
 
 /* Apple Pay / Tikkie / iDEAL bury the merchant in Mededelingen */
 function extractMerchant(name, mede){
-  const all = (name || '') + ' ' + (mede || '');
-  if (/apple\s?pay/i.test(all)){
-    const m = (mede || '').match(/betaling aan\s+([^,\n]+)/i);
-    if (m) return m[1].trim();
-    const seg = (mede || '').split(',')[0].replace(/apple\s?pay/ig, '').trim();
-    if (seg) return seg;
+  name = String(name || '').trim(); mede = String(mede || '');
+  /* 1) Online / Apple Pay payments that bury the merchant in "Betaling aan X" */
+  const m = mede.match(/betaling aan\s+([^,\n]+)/i);
+  if (m) return m[1].trim();
+  /* 2) Tikkie */
+  if (/tikkie/i.test(name + ' ' + mede)){
+    const t = mede.match(/(?:naam|van|aan):?\s*([^,\n]+)/i);
+    if (t) return 'Tikkie · ' + t[1].trim();
   }
-  if (/tikkie/i.test(all)){
-    const m = (mede || '').match(/(?:naam|van|aan):?\s*([^,\n]+)/i);
-    if (m) return 'Tikkie · ' + m[1].trim();
-  }
-  if (/ideal/i.test(all) && mede){
-    const m = mede.match(/(?:betaling aan|naam):?\s*([^,\n]+)/i);
-    if (m) return m[1].trim();
-  }
-  return name || '(geen omschrijving)';
+  /* 3) Otherwise the Naam / Omschrijving column already holds the merchant —
+        true for card payments (incl. in-store Apple Pay), iDEAL, direct debits
+        and transfers. Only ignore it when it is a bare wallet label. */
+  if (name && !/^(apple\s?pay|ideal|tikkie|betaalverzoek)$/i.test(name)) return name;
+  /* 4) Last resort: first useful segment of Mededelingen */
+  const seg = mede.split(',')[0].replace(/apple\s?pay/ig, '').replace(/kaartnr:.*$/i, '').trim();
+  return seg || name || '(geen omschrijving)';
 }
 
 /* Seed keyword rules — fallback only, mapped to ING category ids */
@@ -2336,7 +2336,7 @@ function ImportModal({ data, onClose, onCommit }){
           if (afbij === 'af') amount = -Math.abs(amount);
           else if (afbij === 'bij') amount = Math.abs(amount);
           const counter = get(row, ['tegenrekening','counterparty']).replace(/\s+/g, '').toUpperCase();
-          const isTransfer = !!counter && ibanSet.has(counter);
+          const isTransfer = (!!counter && ibanSet.has(counter)) || (!counter && /spaarrekening/i.test(mede));
           const merchant = extractMerchant(name, mede);
           const descRaw = (name + (mede ? ' · ' + mede : '')).slice(0, 140);
           const hash = djb2(date + '|' + amount.toFixed(2) + '|' + normKey(name));
