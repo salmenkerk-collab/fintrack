@@ -517,6 +517,7 @@ function migrate(d){
   if (!d.fx) d.fx = { GBP: 1.17 };
   // keep EUR value of foreign-currency assets in sync with the stored rate
   (d.assets || []).forEach(a => { if (a.currency === 'GBP') a.value = (a.fxAmount || 0) * (d.fx.GBP || 1.17); });
+  (d.liabilities || []).forEach(l => { if (!l.currency) l.currency = 'EUR'; if (l.currency === 'GBP') l.value = (l.fxAmount || 0) * (d.fx.GBP || 1.17); });
   // one-time: give Charlotte her own London flat (GBP, rented) and remove any stray ownership of Orchislaan
   if (d.settings && !d.settings._charlotteHousingV1){
     if (Array.isArray(d.assets) && !d.assets.some(a => /balmoral/i.test(a.name || ''))){
@@ -706,9 +707,17 @@ function NetWorthTab({ data, setData, lens = 'sven' }){
       setPricing(false);
     }).catch(err => { flash('Price fetch failed: ' + err.message + ' — values unchanged.'); setPricing(false); });
   };
-  const updateLiab = (id, v) => setData({ ...data,
-    liabilities: liabs.map(l => l.id === id ? { ...l, value:v, lastUpdated:ISO(TODAY) } : l),
-    property: { ...data.property, mortgageBalance: v } });
+  const updateLiab = (id, v) => {
+    const tgt = liabs.find(l => l.id === id) || {};
+    const isG = tgt.currency === 'GBP';
+    const rate = (data.fx && data.fx.GBP) || 1.17;
+    const patch = isG
+      ? { fxAmount: parseFloat(v) || 0, value: (parseFloat(v) || 0) * rate, lastUpdated: ISO(TODAY) }
+      : { value: v, lastUpdated: ISO(TODAY) };
+    const next = { ...data, liabilities: liabs.map(l => l.id === id ? { ...l, ...patch } : l) };
+    if (!isG && !tgt.linkedAssetId) next.property = { ...data.property, mortgageBalance: v };
+    setData(next);
+  };
 
   return (
     <div className="stack">
@@ -912,15 +921,20 @@ function NetWorthTab({ data, setData, lens = 'sven' }){
             <h2>Liabilities</h2>
             <table>
               <tbody>
-                {liabs.map(l => (
+                {vLiabs.map(l => (
                   <tr key={l.id}>
-                    <td style={{fontWeight:600}}>{l.name}<div className="muted small">{l.note} <span style={{marginLeft:6}}>{relTime(l.lastUpdated)}</span></div></td>
+                    <td style={{fontWeight:600}}>{l.name}<div className="muted small">{l.note}
+                      {l.owner && l.owner !== 'sven' && <span> · {OWNERS[l.owner]}</span>}
+                      <span style={{marginLeft:6}}>{relTime(l.lastUpdated)}</span></div></td>
                     <td className="r">
-                      <NumInput value={l.value} step={0.01} width={130} onChange={v => updateLiab(l.id, v)} />
+                      <NumInput value={l.currency === 'GBP' ? (l.fxAmount || 0) : l.value} step={0.01} width={130} onChange={v => updateLiab(l.id, v)} />
                     </td>
-                    <td className="r red num" style={{fontWeight:700}}>{fmt(l.value)}</td>
+                    <td className="r red num" style={{fontWeight:700}}>{l.currency === 'GBP'
+                      ? <React.Fragment>{gbpfmt(l.fxAmount || 0)} <span className="dim small">{'· ' + fmt(l.value)}</span></React.Fragment>
+                      : fmt(l.value)}</td>
                   </tr>
                 ))}
+                {vLiabs.length === 0 && <tr><td className="muted" colSpan={3}>No liabilities in this view.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -1948,6 +1962,74 @@ function PropertyAssetCard({ a }){
   );
 }
 
+function RentalPropertyCard({ a, data, setData }){
+  const fx = (data.fx && data.fx.GBP) || 1.17;
+  const isGbp = a.currency === 'GBP';
+  const liabs = data.liabilities || [];
+  const mort = liabs.find(l => l.linkedAssetId === a.id) || null;
+
+  const eurVal = a.value || 0;
+  const mortEur = mort ? (mort.value || 0) : 0;
+  const equityEur = eurVal - mortEur;
+  const ltv = eurVal > 0 ? mortEur / eurVal * 100 : 0;
+  const valNative = isGbp ? (a.fxAmount || 0) : eurVal;
+  const mortNative = mort ? (mort.currency === 'GBP' ? (mort.fxAmount || 0) : (mort.value || 0)) : 0;
+  const equityNative = valNative - mortNative;
+  const rentNative = a.rentGBP || 0;
+  const yieldPct = valNative > 0 ? (rentNative * 12 / valNative * 100) : 0;
+  const sym = isGbp ? '\u00a3' : '\u20ac';
+  const both = (nat, eur) => isGbp ? (gbpfmt(nat) + ' \u00b7 ' + fmt0(eur)) : fmt0(eur);
+
+  const setVal = v => setData({ ...data, assets: data.assets.map(x => x.id === a.id
+    ? { ...x, fxAmount: isGbp ? (parseFloat(v) || 0) : x.fxAmount, value: isGbp ? (parseFloat(v) || 0) * fx : (parseFloat(v) || 0), lastUpdated: ISO(TODAY) }
+    : x) });
+  const setRent = v => setData({ ...data, assets: data.assets.map(x => x.id === a.id ? { ...x, rentGBP: parseFloat(v) || 0 } : x) });
+  const addMort = () => setData({ ...data, liabilities: [...liabs, { id:uid(),
+    name:'Mortgage \u00b7 ' + a.name, value:0, owner:a.owner || 'sven',
+    currency: a.currency || 'EUR', fxAmount: (a.currency === 'GBP' ? 0 : null),
+    linkedAssetId: a.id, monthlyPayment:0, interestRate:0, note:'', lastUpdated: ISO(TODAY) }] });
+  const setMort = patch => setData({ ...data, liabilities: liabs.map(l => {
+    if (!mort || l.id !== mort.id) return l;
+    const nl = { ...l, ...patch };
+    if ('fxAmount' in patch) nl.value = (parseFloat(patch.fxAmount) || 0) * fx;
+    if ('value' in patch) nl.value = parseFloat(patch.value) || 0;
+    nl.lastUpdated = ISO(TODAY);
+    return nl;
+  }) });
+  const delMort = () => { if (mort && confirm('Remove this mortgage?')) setData({ ...data, liabilities: liabs.filter(l => l.id !== mort.id) }); };
+
+  return (
+    <div className="card">
+      <h2>🏠 {a.name}</h2>
+      {a.note && <div className="sub" style={{marginTop:-4, marginBottom:8}}>{a.note}</div>}
+      <div className="kv"><span className="k">Estimated value ({sym})</span>
+        <span className="v"><NumInput value={valNative} step={1000} width={120} onChange={setVal}/></span></div>
+      {isGbp && <div className="kv"><span className="k">In euro</span><span className="v">{fmt0(eurVal)} <span className="dim small">@ {fx.toFixed(4)}</span></span></div>}
+      {mort ? (
+        <React.Fragment>
+          <div className="kv"><span className="k">Mortgage balance ({mort.currency === 'GBP' ? '\u00a3' : '\u20ac'})</span>
+            <span className="v"><NumInput value={mortNative} step={1000} width={120}
+              onChange={v => setMort(mort.currency === 'GBP' ? { fxAmount:v } : { value:v })}/></span></div>
+          <div className="kv"><span className="k">Monthly payment</span>
+            <span className="v"><NumInput value={mort.monthlyPayment || 0} step={50} width={110} onChange={v => setMort({ monthlyPayment:v })}/></span></div>
+          <div className="kv"><span className="k">Interest rate</span>
+            <span className="v"><NumInput value={mort.interestRate || 0} step={0.1} width={70} onChange={v => setMort({ interestRate:v })}/> %</span></div>
+          <div className="kv"><span className="k">Equity</span><span className="v green">{both(equityNative, equityEur)}</span></div>
+          <div className="kv"><span className="k">LTV</span><span className="v">{pct1(ltv)}</span></div>
+        </React.Fragment>
+      ) : (
+        <div className="kv"><span className="k">Mortgage</span>
+          <span className="v"><button className="btn" onClick={addMort}>+ Add mortgage</button></span></div>
+      )}
+      <div className="kv"><span className="k">Monthly rent ({sym})</span>
+        <span className="v"><NumInput value={rentNative} step={50} width={110} onChange={setRent}/></span></div>
+      {rentNative > 0 && valNative > 0 && <div className="kv"><span className="k">Gross yield</span><span className="v">{pct1(yieldPct)}</span></div>}
+      <div className="kv"><span className="k">Owner</span><span className="v">{OWNERS[a.owner] || a.owner}</span></div>
+      {mort && <div className="mt"><button className="btn-icon" title="Remove mortgage" onClick={delMort}>🗑 mortgage</button></div>}
+    </div>
+  );
+}
+
 function PropertyTab({ data, setData, lens = 'sven' }){
   const p = data.property;
   const showSven = lensMatch('sven', lens);
@@ -1957,7 +2039,7 @@ function PropertyTab({ data, setData, lens = 'sven' }){
       <div className="stack">
         {otherProps.length === 0
           ? <div className="card"><h2>Property</h2><div className="muted">No property under {OWNERS[lens] || 'this view'}.</div></div>
-          : otherProps.map(a => <PropertyAssetCard key={a.id} a={a}/>)}
+          : otherProps.map(a => <RentalPropertyCard key={a.id} a={a} data={data} setData={setData}/>)}
       </div>
     );
   }
@@ -2024,7 +2106,7 @@ function PropertyTab({ data, setData, lens = 'sven' }){
 
   return (
     <div className="stack">
-      {otherProps.map(a => <PropertyAssetCard key={a.id} a={a}/>)}
+      {otherProps.map(a => <RentalPropertyCard key={a.id} a={a} data={data} setData={setData}/>)}
       <div className="grid2">
         <div className="card">
           <h2>🏠 Orchislaan 5-1, Arnhem</h2>
