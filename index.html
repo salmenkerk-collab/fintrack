@@ -530,6 +530,7 @@ function migrate(d){
       d.fixedCosts.push({ id:'groc-shared', group:'Housing', name:'Shared groceries', amount:300, note:'From joint Revolut', shared:true });
     d.settings._sharedCostsV1 = true;
   }
+  (d.fixedCosts || []).forEach(c => { if (!c.owner) c.owner = 'sven'; if (!c.currency) c.currency = 'EUR'; if (c.currency === 'GBP') c.amount = (c.fxAmount || 0) * ((d.fx && d.fx.GBP) || 1.17); });
   if (!d.fx) d.fx = { GBP: 1.17 };
   // keep EUR value of foreign-currency assets in sync with the stored rate
   (d.assets || []).forEach(a => { if (a.currency === 'GBP') a.value = (a.fxAmount || 0) * (d.fx.GBP || 1.17); });
@@ -1087,7 +1088,135 @@ function monthlyNeeded(startNW, fp){
   return Math.ceil(hi / 10) * 10;
 }
 
-function FireTab({ data, setData }){
+function PeopleFireView({ data, setData, lens }){
+  const fp = data.fireParams;
+  const fxRate = (data.fx && data.fx.GBP) || 1.17;
+  const A = (data.assets || []).filter(a => lensMatch(a.owner, lens));
+  const L = (data.liabilities || []).filter(l => lensMatch(l.owner, lens));
+  const TYPE = [
+    { key:'stocks',   label:'Stocks',           color:'var(--green)' },
+    { key:'crypto',   label:'Crypto',           color:'var(--orange)' },
+    { key:'savings',  label:'Savings',          color:'var(--gold)' },
+    { key:'property', label:'Property (stones)', color:'var(--blue)' },
+  ];
+  const owns = (x, id) => (x.owner || 'sven') === id;
+  const breakdownFor = id => {
+    const sum = cat => A.filter(a => owns(a, id) && a.category === cat).reduce((s,a) => s + a.value, 0);
+    const propVal = sum('property');
+    const propDebt = L.filter(l => owns(l, id)).reduce((s,l) => s + l.value, 0);
+    return { stocks:sum('stocks'), crypto:sum('crypto'), savings:sum('savings'), property: Math.max(0, propVal - propDebt) };
+  };
+  const people = lens === 'ours' ? [['sven','Sven'],['charlotte','Charlotte']] : [[lens, OWNERS[lens] || 'Charlotte']];
+  const bd = {}; people.forEach(pp => bd[pp[0]] = breakdownFor(pp[0]));
+  const personTotal = id => TYPE.reduce((s,t) => s + bd[id][t.key], 0);
+  const maxTotal = Math.max(1, ...people.map(pp => personTotal(pp[0])));
+
+  const liquid = A.filter(a => a.category !== 'property').reduce((s,a) => s + a.value, 0);
+  const propVal = A.filter(a => a.category === 'property').reduce((s,a) => s + a.value, 0);
+  const debt = L.reduce((s,l) => s + l.value, 0);
+  const propEquity = Math.max(0, propVal - debt);
+  const netWorth = liquid + propEquity;
+
+  // net rental income (rent minus the property's own mortgage payment), annualised in EUR
+  let rentGrossY = 0, rentNetY = 0;
+  A.filter(a => a.category === 'property' && a.rentGBP).forEach(a => {
+    const r = a.currency === 'GBP' ? fxRate : 1;
+    const mort = L.find(l => l.linkedAssetId === a.id);
+    const pay = mort ? (mort.monthlyPayment || 0) : 0;
+    rentGrossY += (a.rentGBP || 0) * 12 * r;
+    rentNetY  += Math.max(0, (a.rentGBP || 0) - pay) * 12 * r;
+  });
+
+  // household FIRE: rental covers part of spend now; portfolio must cover the rest; AOW reduces it further
+  const portfolioSpend = Math.max(0, fp.annualWithdrawal - rentNetY);
+  const contribEachMonth = lens === 'ours' ? fp.monthlyContribution : 0;   // only Sven invests today
+  const aowGrossEach = (fp.aowEnabled ? fp.aowAnnualGross : 0);
+  const aowGrossTotal = aowGrossEach * (lens === 'ours' ? 2 : 1);          // couple = two streams
+  const hhFp = { ...fp, contributionSchedule: [], monthlyContribution: contribEachMonth,
+                 annualWithdrawal: portfolioSpend, aowAnnualGross: aowGrossTotal };
+  const sim = simulate(liquid, hhFp, fp.grossReturn, fp.inflation);
+  const pctToFI = sim.fireNumber > 0 ? Math.min(100, liquid / sim.fireNumber * 100) : 100;
+  const chartRows = sim.rows.filter(r => r.year <= sim.targetYear);
+  const title = lens === 'ours' ? 'Household FIRE \u00b7 Ours' : (OWNERS[lens] || 'Charlotte') + ' \u2014 FIRE';
+
+  return (
+    <div className="stack">
+      <div className="card">
+        <h3>{lens === 'ours' ? 'Who holds what' : (OWNERS[lens] || 'Charlotte') + '\u2019s wealth'}</h3>
+        <div className="sub mb">Property shown as equity (value minus its mortgage). {lens === 'ours' ? 'Charlotte leans into stones, Sven into stocks.' : ''}</div>
+        {people.map(pp => {
+          const id = pp[0], tot = personTotal(id);
+          return (
+            <div key={id} style={{marginBottom:14}}>
+              <div className="spread" style={{marginBottom:4}}><span style={{fontWeight:700}}>{pp[1]}</span><span className="num" style={{fontWeight:700}}>{fmt0(tot)}</span></div>
+              <div style={{display:'flex', height:26, borderRadius:6, overflow:'hidden', width:Math.max(2, tot / maxTotal * 100) + '%', background:'var(--surface2)'}}>
+                {TYPE.map(t => bd[id][t.key] > 0
+                  ? <div key={t.key} title={t.label + ' ' + fmt0(bd[id][t.key])} style={{width:(bd[id][t.key] / tot * 100) + '%', background:t.color}}/>
+                  : null)}
+              </div>
+            </div>
+          );
+        })}
+        <div className="row" style={{gap:14, flexWrap:'wrap', marginTop:6}}>
+          {TYPE.map(t => <span key={t.key} className="small" style={{display:'inline-flex', alignItems:'center', gap:5}}>
+            <span style={{width:10, height:10, borderRadius:2, background:t.color, display:'inline-block'}}/>{t.label}</span>)}
+        </div>
+      </div>
+
+      <div className="grid3">
+        <div className="card"><h3>Investable pot</h3><div className="metric">{fmt0(liquid)}</div><div className="sub">Stocks, crypto & savings{lens === 'ours' ? ' (both)' : ''}</div></div>
+        <div className="card"><h3>Property equity</h3><div className="metric">{fmt0(propEquity)}</div><div className="sub">The \u201cstones\u201d \u00b7 value minus mortgages</div></div>
+        <div className="card"><h3>Net worth</h3><div className="metric">{fmt0(netWorth)}</div><div className="sub">Pot + property equity</div></div>
+      </div>
+
+      <div className="card">
+        <h2>{title}</h2>
+        <div className="grid2">
+          <div>
+            <div className="kv"><span className="k">Net rental income / yr</span><span className="v green">{fmt0(rentNetY)}</span></div>
+            <div className="kv"><span className="k">Household spend assumption / yr</span><span className="v">{fmt0(fp.annualWithdrawal)}</span></div>
+            <div className="kv"><span className="k">Portfolio must cover / yr</span><span className="v">{fmt0(portfolioSpend)}</span></div>
+            <div className="kv"><span className="k">FIRE number (portfolio)</span><span className="v">{fmt0(sim.fireNumber)}</span></div>
+          </div>
+          <div>
+            <div className="kv"><span className="k">% to FI</span><span className="v">{pct1(pctToFI)}</span></div>
+            <div className="kv"><span className="k">FIRE age</span><span className="v">{sim.fireAge !== null ? sim.fireAge : '> horizon'}</span></div>
+            <div className="kv"><span className="k">AOW counted</span><span className="v">{fp.aowEnabled ? (lens === 'ours' ? 'two streams' : 'one') : 'off'}</span></div>
+            <div className="kv"><span className="k">Monthly invested</span><span className="v">{fmt0(contribEachMonth)}</span></div>
+          </div>
+        </div>
+        <div className="mt" style={{height:10, borderRadius:6, background:'var(--surface2)', overflow:'hidden'}}>
+          <div style={{height:'100%', width:Math.min(100, pctToFI) + '%', background:'var(--green)', borderRadius:6, transition:'width .5s'}}/>
+        </div>
+        <div className="sub mt">Charlotte\u2019s rental income covers {portfolioSpend < fp.annualWithdrawal ? fmt0(fp.annualWithdrawal - portfolioSpend) + ' of the ' + fmt0(fp.annualWithdrawal) + ' annual spend' : 'part of spending'}, so the portfolio target drops sharply. Spend & return assumptions live in the Me view; raise the spend for a two-person household if needed.</div>
+      </div>
+
+      {chartRows.length > 1 &&
+        <div className="card">
+          <h3>Combined pot vs target</h3>
+          <div style={{width:'100%', height:240}}>
+            <ResponsiveContainer>
+              <AreaChart data={chartRows} margin={{top:8,right:12,left:4,bottom:0}}>
+                <defs><linearGradient id="hhg" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--green)" stopOpacity={0.5}/>
+                  <stop offset="100%" stopColor="var(--green)" stopOpacity={0.04}/>
+                </linearGradient></defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--rule)"/>
+                <XAxis dataKey="age" tick={{fontSize:11, fill:'var(--muted)'}}/>
+                <YAxis tickFormatter={v => '\u20ac' + Math.round(v/1000) + 'k'} tick={{fontSize:11, fill:'var(--muted)'}} width={48}/>
+                <Tooltip formatter={v => fmt0(v)} labelFormatter={a => 'Age ' + a}/>
+                <ReferenceLine y={sim.fireNumber} stroke="var(--red)" strokeDasharray="5 4" label={{value:'FIRE', fontSize:10, fill:'var(--red)'}}/>
+                <Area type="monotone" dataKey="nominal" stroke="var(--green)" strokeWidth={2} fill="url(#hhg)"/>
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>}
+    </div>
+  );
+}
+
+function FireTab({ data, setData, lens = 'sven' }){
+  if (lens !== 'sven') return <PeopleFireView data={data} setData={setData} lens={lens}/>;
   const fp = data.fireParams;
   const liquid = data.assets
     .filter(a => a.category !== 'property')
@@ -1414,7 +1543,7 @@ function BudgetTab({ data, setData, lens = 'sven' }){
   const split = hh.sharedSplit != null ? hh.sharedSplit : 50;            // Sven's %
   const contribEach = hh.jointContribEach != null ? hh.jointContribEach : 1000;
   const sharedItems = (data.fixedCosts || []).filter(c => c.shared);
-  const personalItems = (data.fixedCosts || []).filter(c => !c.shared);  // Sven's personal fixed
+  const personalItems = (data.fixedCosts || []).filter(c => !c.shared && lensMatch(c.owner, lens));  // personal fixed for this lens
   const sharedTotal = sharedItems.reduce((s,c) => s + monthlyEq(c), 0);
   const personalFixed = personalItems.reduce((s,c) => s + monthlyEq(c), 0);
   const svenShare = sharedTotal * split / 100;
@@ -1431,7 +1560,7 @@ function BudgetTab({ data, setData, lens = 'sven' }){
   if (lens === 'charlotte'){ totalFixed = contribEach; totalIn = income.charlotte || 0; }
   else if (lens === 'ours'){ totalFixed = sharedTotal + personalFixed; totalIn = (income.sven || 0) + (income.charlotte || 0); }
   else { totalFixed = contribEach + personalFixed; totalIn = income.sven || 0; }
-  const visibleFixed = lens === 'ours' ? (data.fixedCosts || []) : lens === 'charlotte' ? [] : personalItems;
+  const visibleFixed = lens === 'ours' ? (data.fixedCosts || []) : personalItems;
   const visibleFixedTotal = visibleFixed.reduce((s,c) => s + monthlyEq(c), 0);
 
   const totalOut = totalFixed + totalVar;
@@ -1597,7 +1726,7 @@ function BudgetTab({ data, setData, lens = 'sven' }){
             <span className="dim small">manage in ⚙ Settings</span>
           </span>
         </div>
-        {lens !== 'ours' && <div className="sub" style={{marginTop:-4, marginBottom:8}}>Shared housing costs are in the Joint account card above.{lens === 'charlotte' ? ' No personal fixed costs tracked for Charlotte yet.' : ''}</div>}
+        {lens !== 'ours' && <div className="sub" style={{marginTop:-4, marginBottom:8}}>Shared housing costs are in the Joint account card above.{visibleFixed.length === 0 ? ' No personal fixed costs here yet.' : ''}</div>}
         {(() => {
           const groups = [];
           visibleFixed.forEach(c => {
@@ -3090,7 +3219,7 @@ function SettingsTab({ data, setData, sync }){
   const dragIdx = useRef(null);
   const [dragOver, setDragOver] = useState(null);
   const [catForm, setCatForm] = useState({ name:'', icon:'🛒', color:'#5E6B3B', type:'variable' });
-  const [costForm, setCostForm] = useState({ name:'', amount:'', categoryId:'vaste-lasten', frequency:'monthly', note:'' });
+  const [costForm, setCostForm] = useState({ name:'', amount:'', categoryId:'vaste-lasten', frequency:'monthly', note:'', owner:'sven', currency:'EUR' });
   const [instForm, setInstForm] = useState({ name:'', type:'broker' });
   const [ibanForm, setIbanForm] = useState({ iban:'', owner:'', type:'personal' });
   const [importMode, setImportMode] = useState('replace');
@@ -3125,14 +3254,28 @@ function SettingsTab({ data, setData, sync }){
 
   /* ---- Section B: fixed costs ---- */
   const updCost = (id, patch) => setData({ ...data,
-    fixedCosts: data.fixedCosts.map(c => c.id === id ? { ...c, ...patch } : c) });
+    fixedCosts: data.fixedCosts.map(c => {
+      if (c.id !== id) return c;
+      const rate = (data.fx && data.fx.GBP) || 1.17;
+      const nc = { ...c, ...patch };
+      if ('fxAmount' in patch && nc.currency === 'GBP') nc.amount = (parseFloat(patch.fxAmount) || 0) * rate;
+      if ('currency' in patch){
+        if (patch.currency === 'GBP'){ if (nc.fxAmount == null) nc.fxAmount = c.amount ? Math.round(c.amount / rate) : 0; nc.amount = (nc.fxAmount || 0) * rate; }
+        else nc.fxAmount = null;
+      }
+      return nc;
+    }) });
   const delCost = id => setData({ ...data, fixedCosts: data.fixedCosts.filter(c => c.id !== id) });
   const addCost = () => {
     if (!costForm.name || !costForm.amount) return;
+    const rate = (data.fx && data.fx.GBP) || 1.17;
+    const native = parseFloat(costForm.amount) || 0;
+    const isG = costForm.currency === 'GBP';
     setData({ ...data, fixedCosts:[...data.fixedCosts,
-      { id: uid(), name: costForm.name, amount: parseFloat(costForm.amount) || 0,
+      { id: uid(), name: costForm.name, amount: isG ? native * rate : native,
+        currency: costForm.currency || 'EUR', fxAmount: isG ? native : null, owner: costForm.owner || 'sven',
         categoryId: costForm.categoryId, frequency: costForm.frequency, note: costForm.note, group: null }] });
-    setCostForm({ name:'', amount:'', categoryId:'vaste-lasten', frequency:'monthly', note:'' });
+    setCostForm({ name:'', amount:'', categoryId:'vaste-lasten', frequency:'monthly', note:'', owner:costForm.owner || 'sven', currency:costForm.currency || 'EUR' });
   };
   const totalFixedEq = (data.fixedCosts || []).reduce((s,c) => s + monthlyEq(c), 0);
 
@@ -3273,12 +3416,23 @@ function SettingsTab({ data, setData, sync }){
       <div className="card">
         <h2>B · Fixed recurring costs</h2>
         <table>
-          <thead><tr><th>Name</th><th className="r">Amount</th><th>Category</th><th>Frequency</th><th>Note</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th className="r">Amount</th><th>Cur</th><th>Owner</th><th>Category</th><th>Frequency</th><th>Note</th><th></th></tr></thead>
           <tbody>
             {(data.fixedCosts || []).map(c => (
               <tr key={c.id}>
                 <td><input value={c.name} style={{width:'95%', minWidth:130}} onChange={e => updCost(c.id, { name:e.target.value })}/></td>
-                <td className="r"><NumInput value={c.amount} step={0.01} width={90} onChange={v => updCost(c.id, { amount:v })}/></td>
+                <td className="r"><NumInput value={c.currency === 'GBP' ? (c.fxAmount || 0) : c.amount} step={0.01} width={90}
+                  onChange={v => updCost(c.id, c.currency === 'GBP' ? { fxAmount:v } : { amount:v })}/></td>
+                <td>
+                  <select value={c.currency || 'EUR'} onChange={e => updCost(c.id, { currency:e.target.value })}>
+                    <option value="EUR">€</option><option value="GBP">£</option>
+                  </select>
+                </td>
+                <td>
+                  <select value={c.owner || 'sven'} onChange={e => updCost(c.id, { owner:e.target.value })}>
+                    {OWNER_OPTS.map(o => <option key={o[0]} value={o[0]}>{o[1]}</option>)}
+                  </select>
+                </td>
                 <td>
                   <select value={c.categoryId} onChange={e => updCost(c.id, { categoryId:e.target.value })}>
                     {cats.map(cc => <option key={cc.id} value={cc.id}>{cc.icon} {cc.name}</option>)}
@@ -3300,7 +3454,15 @@ function SettingsTab({ data, setData, sync }){
         </table>
         <div className="form-grid mt">
           <label className="fld">Name<input value={costForm.name} onChange={e => setCostForm({...costForm, name:e.target.value})}/></label>
-          <label className="fld">Amount (€)<input type="number" value={costForm.amount} onChange={e => setCostForm({...costForm, amount:e.target.value})}/></label>
+          <label className="fld">Amount ({costForm.currency === 'GBP' ? '£' : '€'})<input type="number" value={costForm.amount} onChange={e => setCostForm({...costForm, amount:e.target.value})}/></label>
+          <label className="fld">Currency
+            <select value={costForm.currency || 'EUR'} onChange={e => setCostForm({...costForm, currency:e.target.value})}>
+              <option value="EUR">EUR €</option><option value="GBP">GBP £</option>
+            </select></label>
+          <label className="fld">Owner
+            <select value={costForm.owner || 'sven'} onChange={e => setCostForm({...costForm, owner:e.target.value})}>
+              {OWNER_OPTS.map(o => <option key={o[0]} value={o[0]}>{o[1]}</option>)}
+            </select></label>
           <label className="fld">Category
             <select value={costForm.categoryId} onChange={e => setCostForm({...costForm, categoryId:e.target.value})}>
               {cats.map(cc => <option key={cc.id} value={cc.id}>{cc.icon} {cc.name}</option>)}
@@ -4251,7 +4413,7 @@ function FinanceModel(){
 
       <main key={tab}>
         {tab === 'networth' && <NetWorthTab data={data} setData={setData} lens={lens}/>}
-        {tab === 'fire'     && <FireTab data={data} setData={setData}/>}
+        {tab === 'fire'     && <FireTab data={data} setData={setData} lens={lens}/>}
         {tab === 'budget'   && <BudgetTab data={data} setData={setData} lens={lens}/>}
         {tab === 'goals'    && <GoalsTab data={data} setData={setData} lens={lens}/>}
         {tab === 'portfolio'&& <PortfolioTab data={data} setData={setData} lens={lens}/>}
