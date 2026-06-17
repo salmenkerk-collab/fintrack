@@ -553,11 +553,12 @@ function NumInput({ value, onChange, step=1, min, max, width=110, suffix }){
   );
 }
 
-function HeaderPill({ liquid, snapshots }){
+function HeaderPill({ liquid, snapshots, lens }){
+  const personal = !lens || lens === 'sven';
   const sorted = [...(snapshots||[])].sort((a,b) => a.date.localeCompare(b.date));
   const last = sorted[sorted.length-1];
   let delta = null;
-  if (last && last.liquidNW > 0){
+  if (personal && last && last.liquidNW > 0){
     const d = liquid - last.liquidNW;
     delta = { d, p: d / last.liquidNW * 100 };
   }
@@ -568,9 +569,11 @@ function HeaderPill({ liquid, snapshots }){
       <span className="lp-label">Liquid NW</span>
       <span className="lp-main"><b><CountUp value={liquid} format={fmt0}/></b></span>
       <span className={'lp-delta ' + cls}>
-        {delta
-          ? arrow + ' ' + (delta.d >= 0 ? '+' : '−') + fmt0(Math.abs(delta.d)) + ' (' + (delta.d >= 0 ? '+' : '') + pct1(delta.p) + ')'
-          : 'no snapshot yet'}
+        {!personal
+          ? (OWNERS[lens] || '') + ' view'
+          : (delta
+              ? arrow + ' ' + (delta.d >= 0 ? '+' : '\u2212') + fmt0(Math.abs(delta.d)) + ' (' + (delta.d >= 0 ? '+' : '') + pct1(delta.p) + ')'
+              : 'no snapshot yet')}
       </span>
     </div>
   );
@@ -1929,8 +1932,35 @@ function addMonths(date, m){
 }
 const fmtMonthYear = d => new Intl.DateTimeFormat('nl-NL', { month:'long', year:'numeric' }).format(d);
 
-function PropertyTab({ data, setData }){
+function PropertyAssetCard({ a }){
+  const v = a.value || 0;
+  return (
+    <div className="card">
+      <h2>🏠 {a.name}</h2>
+      <div className="kv"><span className="k">Estimated value</span>
+        <span className="v">{a.currency === 'GBP' ? (gbpfmt(a.fxAmount || 0) + ' · ' + fmt0(v)) : fmt0(v)}</span></div>
+      <div className="kv"><span className="k">Owner</span><span className="v">{OWNERS[a.owner] || a.owner}</span></div>
+      {a.note && <div className="kv"><span className="k">Status</span><span className="v">{a.note}</span></div>}
+      <div className="muted small mt">{v === 0
+        ? ('Set the current value in Net Worth \u2014 tracked in ' + (a.currency || 'EUR') + '.')
+        : ('Edit the value in Net Worth \u00b7 tracked in ' + (a.currency || 'EUR') + '.')}</div>
+    </div>
+  );
+}
+
+function PropertyTab({ data, setData, lens = 'sven' }){
   const p = data.property;
+  const showSven = lensMatch('sven', lens);
+  const otherProps = (data.assets || []).filter(a => a.category === 'property' && (a.owner || 'sven') !== 'sven' && lensMatch(a.owner, lens));
+  if (!showSven){
+    return (
+      <div className="stack">
+        {otherProps.length === 0
+          ? <div className="card"><h2>Property</h2><div className="muted">No property under {OWNERS[lens] || 'this view'}.</div></div>
+          : otherProps.map(a => <PropertyAssetCard key={a.id} a={a}/>)}
+      </div>
+    );
+  }
   const appreciation = !!p.appreciation;
   const extra = data.mortgageOverpayment || 0;
   const rate = p.interestRate || 3.0;
@@ -1994,6 +2024,7 @@ function PropertyTab({ data, setData }){
 
   return (
     <div className="stack">
+      {otherProps.map(a => <PropertyAssetCard key={a.id} a={a}/>)}
       <div className="grid2">
         <div className="card">
           <h2>🏠 Orchislaan 5-1, Arnhem</h2>
@@ -4030,7 +4061,7 @@ function FinanceModel(){
               onClick={() => setLens(L[0])}>{L[1]}</button>
           ))}
         </div>
-        <HeaderPill liquid={liquid} snapshots={data.snapshots}/>
+        <HeaderPill liquid={liquid} snapshots={data.snapshots} lens={lens}/>
       </div>
 
       <nav className="tabs" role="tablist">
@@ -4048,7 +4079,7 @@ function FinanceModel(){
         {tab === 'budget'   && <BudgetTab data={data} setData={setData}/>}
         {tab === 'goals'    && <GoalsTab data={data} setData={setData} lens={lens}/>}
         {tab === 'portfolio'&& <PortfolioTab data={data} setData={setData} lens={lens}/>}
-        {tab === 'property' && <PropertyTab data={data} setData={setData}/>}
+        {tab === 'property' && <PropertyTab data={data} setData={setData} lens={lens}/>}
         {tab === 'history'  && <HistoryTab data={data} setData={setData}/>}
         {tab === 'settings' && <SettingsTab data={data} setData={setData} sync={sync}/>}
       </main>
