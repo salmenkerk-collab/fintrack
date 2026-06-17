@@ -399,9 +399,9 @@ function seedData(){
       A('Sui (SUI)','Wallet 2',33.88,'crypto','wallet2'),
       // Property
       A('Orchislaan 5-1, Arnhem','Funda waardecheck · 66m²',283000,'property','funda'),
-      { id:uid(), name:'Balmoral Court, London', note:'Charlotte · rented out · GBP', value:0,
+      { id:'asset-balmoral', name:'Balmoral Court, London', note:'Charlotte · rented out · GBP', value:409500,
         category:'property', institutionId:'balmoral', owner:'charlotte',
-        currency:'GBP', fxAmount:0, rentGBP:0, lastUpdated:now },
+        currency:'GBP', fxAmount:350000, rentGBP:1994, lastUpdated:now },
       // Savings — ING
       A('Emergency Fund','ING Oranje Spaarrekening',8709.06,'savings','ing'),
       A('Buenos Aires Trip 🇦🇷','ING De Hop Der Hops',2118.44,'savings','ing'),
@@ -409,7 +409,10 @@ function seedData(){
     ],
     liabilities: [
       { id:uid(), name:'Hypotheek ING (N 107-569089)', value:229722.84,
-        note:'€1.040,68/mnd · Passeerdatum 16 dec 2024', lastUpdated:now },
+        note:'€1.040,68/mnd · Passeerdatum 16 dec 2024', owner:'sven', lastUpdated:now },
+      { id:'liab-balmoral-mortgage', name:'Mortgage · Balmoral Court, London', value:163451.34,
+        owner:'charlotte', currency:'GBP', fxAmount:139702, linkedAssetId:'asset-balmoral',
+        monthlyPayment:471, interestRate:2.32, note:'', lastUpdated:now },
     ],
     fireParams: {
       birthYear:1997, targetAge:52, monthlyContribution:800, contributionSchedule:[],
@@ -521,9 +524,13 @@ function migrate(d){
   // one-time: give Charlotte her own London flat (GBP, rented) and remove any stray ownership of Orchislaan
   if (d.settings && !d.settings._charlotteHousingV1){
     if (Array.isArray(d.assets) && !d.assets.some(a => /balmoral/i.test(a.name || ''))){
-      d.assets.push({ id:uid(), name:'Balmoral Court, London', note:'Charlotte · rented out · GBP',
-        value:0, category:'property', institutionId:'balmoral', owner:'charlotte',
-        currency:'GBP', fxAmount:0, rentGBP:0, lastUpdated: ISO(TODAY) });
+      d.assets.push({ id:'asset-balmoral', name:'Balmoral Court, London', note:'Charlotte · rented out · GBP',
+        value:409500, category:'property', institutionId:'balmoral', owner:'charlotte',
+        currency:'GBP', fxAmount:350000, rentGBP:1994, lastUpdated: ISO(TODAY) });
+      if (Array.isArray(d.liabilities) && !d.liabilities.some(l => l.linkedAssetId === 'asset-balmoral'))
+        d.liabilities.push({ id:'liab-balmoral-mortgage', name:'Mortgage · Balmoral Court, London',
+          value:163451.34, owner:'charlotte', currency:'GBP', fxAmount:139702, linkedAssetId:'asset-balmoral',
+          monthlyPayment:471, interestRate:2.32, note:'', lastUpdated: ISO(TODAY) });
     }
     if (Array.isArray(d.institutions) && !d.institutions.some(i => i.id === 'balmoral'))
       d.institutions.push({ id:'balmoral', name:'Balmoral Court (London)', type:'other' });
