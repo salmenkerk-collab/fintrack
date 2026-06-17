@@ -71,6 +71,10 @@
   .brand .wm{ font-family:'Fraunces',Georgia,serif; font-weight:500; font-size:20px; letter-spacing:-.3px; line-height:1.05; }
   .brand .wm .fin{ color:var(--blue); font-style:italic; }
   .brand .tag{ font-size:9.5px; letter-spacing:2px; text-transform:uppercase; color:var(--gold); font-weight:600; margin-top:2px; }
+  .lens{ display:inline-flex; gap:2px; background:rgba(33,31,27,.05); border:1px solid var(--rule); border-radius:12px; padding:3px; }
+  .lens-btn{ border:none; background:none; font:inherit; font-size:12.5px; color:var(--muted); padding:6px 13px; border-radius:9px; cursor:pointer; transition:.15s; }
+  .lens-btn:hover{ color:var(--ink); }
+  .lens-btn.on{ background:var(--blue); color:var(--bg); font-weight:600; }
   .liquid-pill{
     display:flex; flex-direction:column; align-items:flex-end; gap:1px;
     background:var(--surface); border:1px solid var(--surface2);
@@ -404,7 +408,7 @@ function seedData(){
       annualWithdrawal:30000, swr:4,
       aowEnabled:false, aowAge:70, aowAnnualGross:13673, aowBuildPct:100,
     },
-    income: { sven:3671, jointContribution:1000 },
+    income: { sven:3671, charlotte:0, jointContribution:1000 },
     goals: [
       { id:'goal-car-2028', name:'New car', icon:'🚗', target:25000, targetDate:'2028-06', saved:0, monthly:0 },
     ],
@@ -494,6 +498,11 @@ function migrate(d){
     });
     d.settings._xfRetroV1 = true;
   }
+  // household owner tags — default everything to Sven so existing data is unchanged
+  (d.assets || []).forEach(a => { if (!a.owner) a.owner = 'sven'; });
+  (d.liabilities || []).forEach(l => { if (!l.owner) l.owner = 'sven'; });
+  (d.goals || []).forEach(g => { if (!g.owner) g.owner = 'sven'; });
+  if (d.income && d.income.charlotte === undefined) d.income.charlotte = 0;
   return d;
 }
 
@@ -553,12 +562,12 @@ function Placeholder({ icon, title }){
 }
 
 /* ============================ TAB 1 — Net Worth ============================ */
-function NetWorthTab({ data, setData }){
+function NetWorthTab({ data, setData, lens = 'sven' }){
   const [open, setOpen] = useState({ stocks:true, crypto:false, property:false, savings:false });
   const [editingId, setEditingId] = useState(null);
   const [edit, setEdit] = useState({});
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ name:'', note:'', value:'', category:'stocks', institutionId:'degiro', coinId:'' });
+  const [form, setForm] = useState({ name:'', note:'', value:'', category:'stocks', institutionId:'degiro', coinId:'', owner:'sven' });
   const [toast, setToast] = useState(null);
   const [pricing, setPricing] = useState(false);
   const [showDegiro, setShowDegiro] = useState(false);
@@ -566,9 +575,11 @@ function NetWorthTab({ data, setData }){
   const flash = m => { setToast(m); if (toastT.current) clearTimeout(toastT.current); toastT.current = setTimeout(() => setToast(null), 6500); };
 
   const assets = data.assets, liabs = data.liabilities;
-  const sumCat = c => assets.filter(a => a.category === c).reduce((s,a) => s + a.value, 0);
-  const gross = assets.reduce((s,a) => s + a.value, 0);
-  const debt = liabs.reduce((s,l) => s + l.value, 0);
+  const vAssets = assets.filter(a => lensMatch(a.owner, lens));
+  const vLiabs = liabs.filter(l => lensMatch(l.owner, lens));
+  const sumCat = c => vAssets.filter(a => a.category === c).reduce((s,a) => s + a.value, 0);
+  const gross = vAssets.reduce((s,a) => s + a.value, 0);
+  const debt = vLiabs.reduce((s,l) => s + l.value, 0);
   const netWorth = gross - debt;
   const liquid = sumCat('stocks') + sumCat('crypto') + sumCat('savings');
   const propEquity = sumCat('property') - debt;
@@ -579,7 +590,7 @@ function NetWorthTab({ data, setData }){
 
   /* crypto by coin */
   const coins = {};
-  assets.filter(a => a.category === 'crypto').forEach(a => {
+  vAssets.filter(a => a.category === 'crypto').forEach(a => {
     const m = a.name.match(/\(([A-Z]+)\)/);
     const sym = m ? m[1] : a.name;
     coins[sym] = (coins[sym] || 0) + a.value;
@@ -588,7 +599,7 @@ function NetWorthTab({ data, setData }){
 
   /* by institution */
   const instTotals = {};
-  assets.forEach(a => { instTotals[a.institutionId] = (instTotals[a.institutionId] || 0) + a.value; });
+  vAssets.forEach(a => { instTotals[a.institutionId] = (instTotals[a.institutionId] || 0) + a.value; });
 
   const save = next => setData({ ...data, assets: next });
 
@@ -612,11 +623,11 @@ function NetWorthTab({ data, setData }){
     if (!form.name || !form.value) return;
     const base = { id:uid(), name:form.name, note:form.note,
       value:parseFloat(form.value) || 0, category:form.category,
-      institutionId:form.institutionId, lastUpdated: ISO(TODAY) };
+      institutionId:form.institutionId, owner:form.owner || 'sven', lastUpdated: ISO(TODAY) };
     if (form.category === 'crypto'){ base.coinId = form.coinId || coinIdFromName(form.name); base.quantity = null; base.priceEUR = null; }
     if (form.category === 'stocks'){ base.isin = null; }
     save([...assets, base]);
-    setForm({ name:'', note:'', value:'', category:form.category, institutionId:form.institutionId, coinId:'' });
+    setForm({ name:'', note:'', value:'', category:form.category, institutionId:form.institutionId, coinId:'', owner:form.owner });
     setAdding(false);
   };
   const refreshCrypto = () => {
@@ -729,6 +740,10 @@ function NetWorthTab({ data, setData }){
                   <select value={form.institutionId} onChange={e => setForm({...form, institutionId:e.target.value})}>
                     {data.institutions.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
                   </select></label>
+                <label className="fld">Owner
+                  <select value={form.owner || 'sven'} onChange={e => setForm({...form, owner:e.target.value})}>
+                    {OWNER_OPTS.map(o => <option key={o[0]} value={o[0]}>{o[1]}</option>)}
+                  </select></label>
                 {form.category === 'crypto' && (
                   <label className="fld">Coin (for live pricing)
                     <select value={form.coinId || ''} onChange={e => setForm({...form, coinId:e.target.value})}>
@@ -741,7 +756,7 @@ function NetWorthTab({ data, setData }){
             )}
 
             {ASSET_CATS.map(cat => {
-              const rows = assets.filter(a => a.category === cat.id);
+              const rows = vAssets.filter(a => a.category === cat.id);
               const total = rows.reduce((s,a) => s + a.value, 0);
               return (
                 <div key={cat.id}>
@@ -758,7 +773,10 @@ function NetWorthTab({ data, setData }){
                         {rows.map(a => editingId === a.id ? (
                           edit.category === 'crypto' ? (
                             <tr key={a.id}>
-                              <td><input style={{width:'95%'}} value={edit.name} onChange={e => setEdit({...edit, name:e.target.value})}/></td>
+                              <td><input style={{width:'95%'}} value={edit.name} onChange={e => setEdit({...edit, name:e.target.value})}/>
+                                <select className="small" style={{marginTop:4, width:'95%'}} value={edit.owner || 'sven'} onChange={e => setEdit({...edit, owner:e.target.value})}>
+                                  {OWNER_OPTS.map(o => <option key={o[0]} value={o[0]}>{o[1]}</option>)}
+                                </select></td>
                               <td>
                                 <span className="row" style={{gap:4}}>
                                   <select value={edit.coinId || ''} onChange={e => setEdit({...edit, coinId:e.target.value})} style={{maxWidth:84}}>
@@ -778,7 +796,10 @@ function NetWorthTab({ data, setData }){
                             </tr>
                           ) : (
                             <tr key={a.id}>
-                              <td><input style={{width:'95%'}} value={edit.name} onChange={e => setEdit({...edit, name:e.target.value})}/></td>
+                              <td><input style={{width:'95%'}} value={edit.name} onChange={e => setEdit({...edit, name:e.target.value})}/>
+                                <select className="small" style={{marginTop:4, width:'95%'}} value={edit.owner || 'sven'} onChange={e => setEdit({...edit, owner:e.target.value})}>
+                                  {OWNER_OPTS.map(o => <option key={o[0]} value={o[0]}>{o[1]}</option>)}
+                                </select></td>
                               <td><input style={{width:'95%'}} value={edit.note} onChange={e => setEdit({...edit, note:e.target.value})}/></td>
                               <td className="r"><input type="number" style={{width:100}} value={edit.value} onChange={e => setEdit({...edit, value:e.target.value})}/></td>
                               <td className="r" style={{whiteSpace:'nowrap'}}>
@@ -797,6 +818,7 @@ function NetWorthTab({ data, setData }){
                               {a.category === 'crypto' && a.quantity != null &&
                                 <span> · {(+a.quantity).toLocaleString('nl-NL',{maximumFractionDigits:6})} {tickerFromName(a.name)}{a.priceEUR ? (' @ ' + fmt(a.priceEUR)) : ''}</span>}
                               <span style={{marginLeft:6}}>{relTime(a.lastUpdated)}</span>
+                              {a.owner && a.owner !== 'sven' && <span className="dim" style={{marginLeft:6}}>· {OWNERS[a.owner]}</span>}
                             </td>
                             <td className="r num" style={{fontWeight:700}}>{fmt(a.value)}</td>
                             <td className="r" style={{whiteSpace:'nowrap'}}>
@@ -1394,11 +1416,15 @@ function BudgetTab({ data, setData }){
               <td className="r"><NumInput value={income.sven} step={10} onChange={v => setIncome('sven', v)}/></td>
             </tr>
             <tr>
+              <td style={{fontWeight:600}}>Charlotte net monthly income <div className="muted small">Her own accounts — not in the shared budget yet</div></td>
+              <td className="r"><NumInput value={income.charlotte || 0} step={10} onChange={v => setIncome('charlotte', v)}/></td>
+            </tr>
+            <tr>
               <td style={{fontWeight:600}}>Joint account contribution (Charlotte) <div className="muted small">50/50 split of shared costs</div></td>
               <td className="r"><NumInput value={income.jointContribution} step={10} onChange={v => setIncome('jointContribution', v)}/></td>
             </tr>
             <tr>
-              <td style={{fontWeight:700}}>Total household inflow</td>
+              <td style={{fontWeight:700}}>Shared budget inflow <div className="muted small">Sven + Charlotte\u2019s joint contribution</div></td>
               <td className="r num green" style={{fontWeight:800, fontSize:16}}>{fmt(totalIn)}</td>
             </tr>
           </tbody>
@@ -1599,6 +1625,18 @@ function BudgetTab({ data, setData }){
   );
 }
 
+/* ---- household: owner tags + Me / Charlotte / Ours lens ---- */
+const OWNERS = { sven:'Sven', charlotte:'Charlotte', joint:'Joint' };
+const OWNER_OPTS = [['sven','Sven'], ['charlotte','Charlotte'], ['joint','Joint']];
+const LENSES = [['sven','Me'], ['charlotte','Charlotte'], ['ours','Ours']];
+function lensMatch(owner, lens){
+  owner = owner || 'sven';
+  if (!lens || lens === 'ours') return true;
+  if (lens === 'sven') return owner === 'sven' || owner === 'joint';
+  if (lens === 'charlotte') return owner === 'charlotte' || owner === 'joint';
+  return true;
+}
+
 /* ---- holding icons: real coin / brand logos with a warm monogram fallback ---- */
 const STOCK_DOMAINS = [
   [/nvidia/i,'nvidia.com'], [/amazon/i,'amazon.com'], [/asml/i,'asml.com'],
@@ -1633,11 +1671,12 @@ function HoldingIcon({ asset }){
 }
 
 /* ============================ TAB 4 — Portfolio ============================ */
-function PortfolioTab({ data, setData }){
+function PortfolioTab({ data, setData, lens = 'sven' }){
   const assets = data.assets;
+  const vAssets = assets.filter(a => lensMatch(a.owner, lens));
   const setCost = (id, v) => setData({ ...data, assets: data.assets.map(a => a.id === id ? { ...a, costBasis: v } : a) });
-  const stocks = assets.filter(a => a.category === 'stocks');
-  const crypto = assets.filter(a => a.category === 'crypto');
+  const stocks = vAssets.filter(a => a.category === 'stocks');
+  const crypto = vAssets.filter(a => a.category === 'crypto');
   const sum = arr => arr.reduce((s,a) => s + a.value, 0);
 
   const stocksTotal = sum(stocks), cryptoTotal = sum(crypto);
@@ -1656,7 +1695,7 @@ function PortfolioTab({ data, setData }){
   const cryptoPct = invTotal ? cryptoTotal/invTotal*100 : 0;
 
   const concentrated = new Set(indiv.filter(a => stocksTotal > 0 && a.value/stocksTotal > 0.15).map(a => a.id));
-  const sp500 = assets.filter(a => /S&P 500/i.test(a.name));
+  const sp500 = vAssets.filter(a => /S&P 500/i.test(a.name));
   const sp500Overlap = sp500.length >= 2;
   const sp500Ids = new Set(sp500.map(a => a.id));
 
@@ -3484,22 +3523,23 @@ function monthsToReach(target, saved, monthly, ratePct){
   return m >= 1200 ? Infinity : m;
 }
 
-function GoalsTab({ data, setData }){
+function GoalsTab({ data, setData, lens = 'sven' }){
   const goals = data.goals || [];
+  const vGoals = goals.filter(g => lensMatch(g.owner, lens));
   const nowMK = monthKey();
-  const blank = { name:'', icon:'🎯', target:0, targetDate: addMonthsMK(nowMK, 24), saved:0, monthly:0 };
-  const [showForm, setShowForm] = useState(goals.length === 0);
+  const blank = { name:'', icon:'🎯', target:0, targetDate: addMonthsMK(nowMK, 24), saved:0, monthly:0, owner:'sven' };
+  const [showForm, setShowForm] = useState(vGoals.length === 0);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(blank);
 
   const setGoals = next => setData({ ...data, goals: next });
   const setGoal = (id, k, v) => setGoals(goals.map(g => g.id === id ? { ...g, [k]: v } : g));
   const startAdd = () => { setForm(blank); setEditingId(null); setShowForm(true); };
-  const startEdit = g => { setForm({ name:g.name, icon:g.icon || '🎯', target:g.target, targetDate:g.targetDate, saved:g.saved || 0, monthly:g.monthly || 0 }); setEditingId(g.id); setShowForm(true); };
+  const startEdit = g => { setForm({ name:g.name, icon:g.icon || '🎯', target:g.target, targetDate:g.targetDate, saved:g.saved || 0, monthly:g.monthly || 0, owner:g.owner || 'sven' }); setEditingId(g.id); setShowForm(true); };
   const save = () => {
     if (!form.name || !form.target || !form.targetDate) return;
     const g = { name:String(form.name).trim(), icon:form.icon || '🎯', target:Number(form.target) || 0,
-      targetDate:form.targetDate, saved:Number(form.saved) || 0, monthly:Number(form.monthly) || 0 };
+      targetDate:form.targetDate, saved:Number(form.saved) || 0, monthly:Number(form.monthly) || 0, owner:form.owner || 'sven' };
     if (editingId) setGoals(goals.map(x => x.id === editingId ? { ...x, ...g } : x));
     else setGoals(goals.concat([{ id:uid(), ...g }]));
     setForm(blank); setEditingId(null); setShowForm(false);
@@ -3529,9 +3569,9 @@ function GoalsTab({ data, setData }){
     return { n, remaining, reached, required, pct, planned, projMonths, projDate, onTrack };
   };
 
-  const totalRequired = goals.reduce((s, g) => s + calc(g).required, 0);
-  const totalSaved = goals.reduce((s, g) => s + (g.saved || 0), 0);
-  const totalTarget = goals.reduce((s, g) => s + g.target, 0);
+  const totalRequired = vGoals.reduce((s, g) => s + calc(g).required, 0);
+  const totalSaved = vGoals.reduce((s, g) => s + (g.saved || 0), 0);
+  const totalTarget = vGoals.reduce((s, g) => s + g.target, 0);
 
   return (
     <div className="stack">
@@ -3540,10 +3580,10 @@ function GoalsTab({ data, setData }){
           <h2 style={{margin:0}}>Savings goals</h2>
           <button className="btn btn-blue" onClick={startAdd}>+ Add goal</button>
         </div>
-        {goals.length > 0 &&
+        {vGoals.length > 0 &&
           <div className="grid3 mt">
             <div className="card" style={{background:'var(--bg)'}}>
-              <h3>Goals</h3><div className="metric">{goals.length}</div>
+              <h3>Goals</h3><div className="metric">{vGoals.length}</div>
               <div className="sub">{fmt0(totalSaved)} saved of {fmt0(totalTarget)}</div>
             </div>
             <div className="card" style={{background:'var(--bg)'}}>
@@ -3572,6 +3612,7 @@ function GoalsTab({ data, setData }){
             <label className="fld">Target date<input type="month" value={form.targetDate} onChange={e => setForm({ ...form, targetDate:e.target.value })} style={{width:160}}/></label>
             <label className="fld">Already saved<NumInput value={form.saved} step={100} onChange={v => setForm({ ...form, saved:v })} suffix="€"/></label>
             <label className="fld">Planned/mnd <span className="dim">(optional)</span><NumInput value={form.monthly} step={25} onChange={v => setForm({ ...form, monthly:v })} suffix="€"/></label>
+            <label className="fld">Owner<select value={form.owner || 'sven'} onChange={e => setForm({ ...form, owner:e.target.value })} style={{width:130}}>{OWNER_OPTS.map(o => <option key={o[0]} value={o[0]}>{o[1]}</option>)}</select></label>
           </div>
           <div className="row mt" style={{gap:8}}>
             <button className="btn btn-blue" onClick={save}>{editingId ? 'Save' : 'Add goal'}</button>
@@ -3579,10 +3620,10 @@ function GoalsTab({ data, setData }){
           </div>
         </div>}
 
-      {goals.length === 0 && !showForm &&
+      {vGoals.length === 0 && !showForm &&
         <div className="card"><div className="sub">No goals yet. Add one — like a 25.000 car in 2028 — and you'll get a monthly savings target.</div></div>}
 
-      {goals.slice().sort((a, b) => String(a.targetDate).localeCompare(String(b.targetDate))).map(g => {
+      {vGoals.slice().sort((a, b) => String(a.targetDate).localeCompare(String(b.targetDate))).map(g => {
         const c = calc(g);
         return (
           <div key={g.id} className="card">
@@ -3883,6 +3924,7 @@ const TABS = [
 function FinanceModel(){
   const [data, setData] = useState(loadData);
   const [tab, setTab] = useState('networth');
+  const [lens, setLens] = useState('sven');
   const sync = useCloudSync(data, setData);
 
   useEffect(() => {
@@ -3890,7 +3932,7 @@ function FinanceModel(){
   }, [data]);
 
   const liquid = data.assets
-    .filter(a => a.category !== 'property')
+    .filter(a => a.category !== 'property' && lensMatch(a.owner, lens))
     .reduce((s,a) => s + a.value, 0);
 
   return (
@@ -3912,6 +3954,12 @@ function FinanceModel(){
             <span className="tag">Private-wealth almanac</span>
           </div>
         </div>
+        <div className="lens" role="tablist" aria-label="Whose finances">
+          {LENSES.map(L => (
+            <button key={L[0]} className={'lens-btn' + (lens === L[0] ? ' on' : '')}
+              onClick={() => setLens(L[0])}>{L[1]}</button>
+          ))}
+        </div>
         <HeaderPill liquid={liquid} snapshots={data.snapshots}/>
       </div>
 
@@ -3925,11 +3973,11 @@ function FinanceModel(){
       </nav>
 
       <main key={tab}>
-        {tab === 'networth' && <NetWorthTab data={data} setData={setData}/>}
+        {tab === 'networth' && <NetWorthTab data={data} setData={setData} lens={lens}/>}
         {tab === 'fire'     && <FireTab data={data} setData={setData}/>}
         {tab === 'budget'   && <BudgetTab data={data} setData={setData}/>}
-        {tab === 'goals'    && <GoalsTab data={data} setData={setData}/>}
-        {tab === 'portfolio'&& <PortfolioTab data={data} setData={setData}/>}
+        {tab === 'goals'    && <GoalsTab data={data} setData={setData} lens={lens}/>}
+        {tab === 'portfolio'&& <PortfolioTab data={data} setData={setData} lens={lens}/>}
         {tab === 'property' && <PropertyTab data={data} setData={setData}/>}
         {tab === 'history'  && <HistoryTab data={data} setData={setData}/>}
         {tab === 'settings' && <SettingsTab data={data} setData={setData} sync={sync}/>}
