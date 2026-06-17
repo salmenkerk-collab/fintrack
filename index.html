@@ -422,17 +422,18 @@ function seedData(){
       aowEnabled:false, aowAge:70, aowAnnualGross:13673, aowBuildPct:100,
     },
     income: { sven:3671, charlotte:0, jointContribution:1000 },
+    household: { jointContribEach:1000, sharedSplit:50 },
     fx: { GBP: 1.17 },
     goals: [
       { id:'goal-car-2028', name:'New car', icon:'🚗', target:25000, targetDate:'2028-06', saved:0, monthly:0 },
     ],
     fixedCosts: [
-      { id:'hyp',  group:'Housing', name:'Hypotheek ING', amount:1040.68, note:'' },
-      { id:'vve',  group:'Housing', name:'VVE bijdrage', amount:230.00, note:'Incl. brandverzekering — niet dubbel tellen' },
-      { id:'gas',  group:'Housing', name:'Gas & elektra', amount:120.00, note:'Estimate' },
-      { id:'ozb',  group:'Housing', name:'Gemeente (OZB + etc.)', amount:57.00, note:'€684/jr ÷ 12' },
-      { id:'wat',  group:'Housing', name:'Waterschapsbelasting', amount:17.00, note:'~€200/jr ÷ 12' },
-      { id:'afv',  group:'Housing', name:'Afvalstoffenheffing', amount:23.00, note:'~€280/jr ÷ 12' },
+      { id:'hyp',  group:'Housing', name:'Hypotheek ING', amount:1040.68, note:'' , shared:true },
+      { id:'vve',  group:'Housing', name:'VVE bijdrage', amount:230.00, note:'Incl. brandverzekering — niet dubbel tellen' , shared:true },
+      { id:'gas',  group:'Housing', name:'Gas & elektra', amount:150.00, note:'Estimate', shared:true },
+      { id:'ozb',  group:'Housing', name:'Gemeente (OZB + etc.)', amount:57.00, note:'€684/jr ÷ 12' , shared:true },
+      { id:'wat',  group:'Housing', name:'Waterschapsbelasting', amount:17.00, note:'~€200/jr ÷ 12' , shared:true },
+      { id:'afv',  group:'Housing', name:'Afvalstoffenheffing', amount:23.00, note:'~€280/jr ÷ 12' , shared:true },
       { id:'ben',  group:'Transport', name:'Benzine', amount:90.00, note:'' },
       { id:'avz',  group:'Transport', name:'Autoverzekering', amount:85.00, note:'' },
       { id:'weg',  group:'Transport', name:'Wegenbelasting', amount:61.33, note:'€184/kwartaal ÷ 3' },
@@ -441,8 +442,9 @@ function seedData(){
       { id:'klav', group:'Insurance & Health', name:'Klaverblad', amount:7.01, note:'' },
       { id:'mon',  group:'Insurance & Health', name:'Monuta', amount:8.35, note:'' },
       { id:'odip', group:'Subscriptions & Comms', name:'Odido phone', amount:26.00, note:'' },
-      { id:'odii', group:'Subscriptions & Comms', name:'Odido internet (home)', amount:36.00, note:'No TV' },
+      { id:'odii', group:'Subscriptions & Comms', name:'Odido internet (home)', amount:36.00, note:'No TV', shared:true },
       { id:'subs', group:'Subscriptions & Comms', name:'Streaming, apps, gym, etc.', amount:100.00, note:'Estimate — adjust' },
+      { id:'groc-shared', group:'Housing', name:'Shared groceries', amount:300.00, note:'From joint Revolut', shared:true },
     ],
     property: { value:283000, mortgageBalance:229722.84, interestRate:3.0, size:66 },
     snapshots: [],
@@ -517,6 +519,17 @@ function migrate(d){
   (d.liabilities || []).forEach(l => { if (!l.owner) l.owner = 'sven'; });
   (d.goals || []).forEach(g => { if (!g.owner) g.owner = 'sven'; });
   if (d.income && d.income.charlotte === undefined) d.income.charlotte = 0;
+  if (!d.household) d.household = {};
+  if (d.household.jointContribEach == null) d.household.jointContribEach = ((d.income || {}).jointContribution) || 1000;
+  if (d.household.sharedSplit == null) d.household.sharedSplit = 50;
+  if (d.fixedCosts && d.settings && !d.settings._sharedCostsV1){
+    const sharedIds = { hyp:1, vve:1, gas:1, ozb:1, wat:1, afv:1, odii:1 };
+    d.fixedCosts.forEach(c => { if (sharedIds[c.id]) c.shared = true; });
+    const gas = d.fixedCosts.find(c => c.id === 'gas'); if (gas && gas.amount < 150) gas.amount = 150;
+    if (!d.fixedCosts.some(c => c.id === 'groc-shared'))
+      d.fixedCosts.push({ id:'groc-shared', group:'Housing', name:'Shared groceries', amount:300, note:'From joint Revolut', shared:true });
+    d.settings._sharedCostsV1 = true;
+  }
   if (!d.fx) d.fx = { GBP: 1.17 };
   // keep EUR value of foreign-currency assets in sync with the stored rate
   (d.assets || []).forEach(a => { if (a.currency === 'GBP') a.value = (a.fxAmount || 0) * (d.fx.GBP || 1.17); });
@@ -1374,7 +1387,7 @@ function MonthCompare({ data, mk }){
   );
 }
 
-function BudgetTab({ data, setData }){
+function BudgetTab({ data, setData, lens = 'sven' }){
   const [vForm, setVForm] = useState({ name:'', amount:'', categoryId:'boodschappen' });
   const [showImport, setShowImport] = useState(false);
   const [showCsv, setShowCsv] = useState(false);
@@ -1397,20 +1410,36 @@ function BudgetTab({ data, setData }){
   const cats = budgetCats(data);
   const varCats = cats.filter(c => c.type === 'variable');
   const income = data.income;
-  const totalIn = income.sven + income.jointContribution;
-  const totalFixed = (data.fixedCosts || []).reduce((s,c) => s + monthlyEq(c), 0);
+  const hh = data.household || {};
+  const split = hh.sharedSplit != null ? hh.sharedSplit : 50;            // Sven's %
+  const contribEach = hh.jointContribEach != null ? hh.jointContribEach : 1000;
+  const sharedItems = (data.fixedCosts || []).filter(c => c.shared);
+  const personalItems = (data.fixedCosts || []).filter(c => !c.shared);  // Sven's personal fixed
+  const sharedTotal = sharedItems.reduce((s,c) => s + monthlyEq(c), 0);
+  const personalFixed = personalItems.reduce((s,c) => s + monthlyEq(c), 0);
+  const svenShare = sharedTotal * split / 100;
+  const jointIn = contribEach * 2;
+  const jointBuffer = jointIn - sharedTotal;
 
-  const monthTx = (data.transactions || []).filter(t => t.date.slice(0,7) === mk && !t.isTransfer);
+  const monthTx = (data.transactions || []).filter(t => t.date.slice(0,7) === mk && !t.isTransfer && lensMatch(t.account, lens));
   const monthExpenses = monthTx.filter(t => t.amount < 0 && catOf(data, t.categoryId).type === 'variable');
   const monthIncomeTx = monthTx.filter(t => t.amount > 0 && catOf(data, t.categoryId).type === 'income');
   const totalVar = monthExpenses.reduce((s,t) => s + Math.abs(t.amount), 0);
   const importedIncome = monthIncomeTx.reduce((s,t) => s + t.amount, 0);
+
+  let totalFixed, totalIn;
+  if (lens === 'charlotte'){ totalFixed = contribEach; totalIn = income.charlotte || 0; }
+  else if (lens === 'ours'){ totalFixed = sharedTotal + personalFixed; totalIn = (income.sven || 0) + (income.charlotte || 0); }
+  else { totalFixed = contribEach + personalFixed; totalIn = income.sven || 0; }
+  const visibleFixed = lens === 'ours' ? (data.fixedCosts || []) : lens === 'charlotte' ? [] : personalItems;
+  const visibleFixedTotal = visibleFixed.reduce((s,c) => s + monthlyEq(c), 0);
 
   const totalOut = totalFixed + totalVar;
   const surplus = totalIn - totalOut;
   const savingsRate = totalIn > 0 ? surplus / totalIn * 100 : 0;
 
   const setIncome = (k,v) => setData({ ...data, income: { ...income, [k]: v } });
+  const setHH = (k,v) => setData({ ...data, household: { ...(data.household || {}), [k]: parseFloat(v) || 0 } });
   const setCost = (id,v) => setData({ ...data,
     fixedCosts: data.fixedCosts.map(c => c.id === id ? { ...c, amount:v } : c) });
 
@@ -1418,7 +1447,7 @@ function BudgetTab({ data, setData }){
     if (!vForm.name || !vForm.amount) return;
     const date = (mk === curMonth) ? ISO(TODAY) : mk + '-15';
     const tx = { id:uid(), date:date, description:vForm.name,
-      amount:-Math.abs(parseFloat(vForm.amount) || 0), account:'sven',
+      amount:-Math.abs(parseFloat(vForm.amount) || 0), account:(lens === 'charlotte' ? 'charlotte' : lens === 'ours' ? 'joint' : 'sven'),
       categoryId:vForm.categoryId, source:'manual', hash:null, isTransfer:false };
     setData({ ...data, transactions:[...(data.transactions||[]), tx] });
     setVForm({ name:'', amount:'', categoryId:vForm.categoryId });
@@ -1502,47 +1531,81 @@ function BudgetTab({ data, setData }){
       </div>
 
       <div className="card">
-        <h2>Income — {monthLabel(mk)}</h2>
+        <h2>Income — {monthLabel(mk)}{lens === 'sven' ? '' : ' · ' + (lens === 'ours' ? 'Ours' : 'Charlotte') + ' view'}</h2>
         <table>
           <tbody>
+            {(lens === 'sven' || lens === 'ours') &&
+              <tr>
+                <td style={{fontWeight:600}}>Sven net income <div className="muted small">VMI Holland B.V. · incl. transport</div></td>
+                <td className="r"><NumInput value={income.sven} step={10} onChange={v => setIncome('sven', v)}/></td>
+              </tr>}
+            {(lens === 'charlotte' || lens === 'ours') &&
+              <tr>
+                <td style={{fontWeight:600}}>Charlotte net income <div className="muted small">Just started — provisional until a few payslips land</div></td>
+                <td className="r"><NumInput value={income.charlotte || 0} step={10} onChange={v => setIncome('charlotte', v)}/></td>
+              </tr>}
             <tr>
-              <td style={{fontWeight:600}}>Sven net monthly income <div className="muted small">Incl. transport reimbursement · VMI Holland B.V.</div></td>
-              <td className="r"><NumInput value={income.sven} step={10} onChange={v => setIncome('sven', v)}/></td>
-            </tr>
-            <tr>
-              <td style={{fontWeight:600}}>Charlotte net monthly income <div className="muted small">Her own accounts — not in the shared budget yet</div></td>
-              <td className="r"><NumInput value={income.charlotte || 0} step={10} onChange={v => setIncome('charlotte', v)}/></td>
-            </tr>
-            <tr>
-              <td style={{fontWeight:600}}>Joint account contribution (Charlotte) <div className="muted small">50/50 split of shared costs</div></td>
-              <td className="r"><NumInput value={income.jointContribution} step={10} onChange={v => setIncome('jointContribution', v)}/></td>
-            </tr>
-            <tr>
-              <td style={{fontWeight:700}}>Shared budget inflow <div className="muted small">Sven + Charlotte\u2019s joint contribution</div></td>
+              <td style={{fontWeight:700}}>{lens === 'ours' ? 'Household income' : lens === 'charlotte' ? 'Charlotte income' : 'Your income'}</td>
               <td className="r num green" style={{fontWeight:800, fontSize:16}}>{fmt(totalIn)}</td>
             </tr>
           </tbody>
         </table>
+        {lens === 'charlotte' && (income.charlotte || 0) === 0 &&
+          <div className="sub">Charlotte just started work — set a provisional take-home, or leave at zero until the first payslips land.</div>}
         {importedIncome > 0 &&
           <div className="sub">Imported income this month (CSV): <b className="num green">{fmt(importedIncome)}</b></div>}
       </div>
 
       <div className="card">
         <div className="spread mb">
-          <h2 style={{margin:0}}>Fixed costs</h2>
+          <h2 style={{margin:0}}>Joint account · shared costs</h2>
+          <span className="badge badge-blue num">{fmt(sharedTotal)}/mnd</span>
+        </div>
+        <div className="sub" style={{marginTop:-4, marginBottom:8}}>You each pay {fmt(contribEach)} into the joint Revolut at month-end; the fixed shared costs below come out of it.</div>
+        <table>
+          <thead><tr><th>Cost</th><th className="r">Total</th><th className="r">Each ({split}/{100 - split})</th></tr></thead>
+          <tbody>
+            {sharedItems.map(c => (
+              <tr key={c.id}>
+                <td style={{fontWeight:600}}>{c.name}</td>
+                <td className="r"><NumInput value={c.amount} step={1} width={100} onChange={v => setCost(c.id, v)}/></td>
+                <td className="r num muted">{fmt(monthlyEq(c) * split / 100)}</td>
+              </tr>
+            ))}
+            <tr style={{borderTop:'2px solid var(--rule)'}}>
+              <td style={{fontWeight:800}}>Total shared</td>
+              <td className="r num" style={{fontWeight:800}}>{fmt(sharedTotal)}</td>
+              <td className="r num" style={{fontWeight:800}}>{fmt(svenShare)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div className="kv mt"><span className="k">Contributions in (you + Charlotte)</span><span className="v green">{fmt(jointIn)}</span></div>
+        <div className="kv"><span className="k">Shared costs out</span><span className="v red">−{fmt(sharedTotal)}</span></div>
+        <div className="kv"><span className="k">Buffer building in joint / mnd</span>
+          <span className={'v ' + (jointBuffer >= 0 ? 'green' : 'red')}>{fmt(jointBuffer)}</span></div>
+        <div className="row mt" style={{gap:16, flexWrap:'wrap'}}>
+          <label className="fld">Each contributes / mnd<NumInput value={contribEach} step={50} width={110} onChange={v => setHH('jointContribEach', v)}/></label>
+          <label className="fld">Your split %<NumInput value={split} step={5} width={80} onChange={v => setHH('sharedSplit', v)}/></label>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="spread mb">
+          <h2 style={{margin:0}}>{lens === 'ours' ? 'All fixed costs' : 'Personal fixed costs'}</h2>
           <span className="row" style={{gap:8}}>
-            <span className="badge badge-blue num">{fmt(totalFixed)}/mnd</span>
+            <span className="badge badge-blue num">{fmt(visibleFixedTotal)}/mnd</span>
             <span className="dim small">manage in ⚙ Settings</span>
           </span>
         </div>
+        {lens !== 'ours' && <div className="sub" style={{marginTop:-4, marginBottom:8}}>Shared housing costs are in the Joint account card above.{lens === 'charlotte' ? ' No personal fixed costs tracked for Charlotte yet.' : ''}</div>}
         {(() => {
           const groups = [];
-          (data.fixedCosts || []).forEach(c => {
+          visibleFixed.forEach(c => {
             const g = c.group || catOf(data, c.categoryId).name;
             if (!groups.includes(g)) groups.push(g);
           });
           return groups.map(g => {
-            const rows = data.fixedCosts.filter(c => (c.group || catOf(data, c.categoryId).name) === g);
+            const rows = visibleFixed.filter(c => (c.group || catOf(data, c.categoryId).name) === g);
             const gTotal = rows.reduce((s,c) => s + monthlyEq(c), 0);
             return (
               <div key={g} className="mb">
@@ -1701,15 +1764,39 @@ function BudgetTab({ data, setData }){
       <MonthCompare data={data} mk={mk}/>
 
       <div className="card">
-        <h2>Month summary</h2>
-        <div className="kv"><span className="k">Total fixed</span><span className="v">{fmt(totalFixed)}/mnd</span></div>
-        <div className="kv"><span className="k">Variable (this month)</span><span className="v">{fmt(totalVar)}</span></div>
+        <h2>Month summary{lens === 'sven' ? '' : ' · ' + (lens === 'ours' ? 'Ours' : 'Charlotte')}</h2>
+        {lens === 'ours' ? (
+          <React.Fragment>
+            <div className="kv"><span className="k">Household income</span><span className="v">{fmt(totalIn)}</span></div>
+            <div className="kv"><span className="k">Shared costs</span><span className="v">−{fmt(sharedTotal)}</span></div>
+            <div className="kv"><span className="k">Sven personal fixed</span><span className="v">−{fmt(personalFixed)}</span></div>
+            <div className="kv"><span className="k">Variable (this month)</span><span className="v">−{fmt(totalVar)}</span></div>
+          </React.Fragment>
+        ) : lens === 'charlotte' ? (
+          <React.Fragment>
+            <div className="kv"><span className="k">Charlotte income</span><span className="v">{fmt(totalIn)}</span></div>
+            <div className="kv"><span className="k">Joint contribution</span><span className="v">−{fmt(contribEach)}</span></div>
+            <div className="kv"><span className="k">Variable (this month)</span><span className="v">−{fmt(totalVar)}</span></div>
+          </React.Fragment>
+        ) : (
+          <React.Fragment>
+            <div className="kv"><span className="k">Your income</span><span className="v">{fmt(totalIn)}</span></div>
+            <div className="kv"><span className="k">Joint contribution</span><span className="v">−{fmt(contribEach)}</span></div>
+            <div className="kv"><span className="k">Personal fixed</span><span className="v">−{fmt(personalFixed)}</span></div>
+            <div className="kv"><span className="k">Variable (this month)</span><span className="v">−{fmt(totalVar)}</span></div>
+          </React.Fragment>
+        )}
         <div className="kv"><span className="k">Total outgoing</span><span className="v">{fmt(totalOut)}</span></div>
         <div className="kv"><span className="k">Remaining / surplus</span>
           <span className={'v ' + (surplus >= 0 ? 'green' : 'red')}>{fmt(surplus)}</span></div>
         <div className="kv"><span className="k">Savings rate</span>
           <span className={'v ' + (savingsRate >= 0 ? 'green' : 'red')}>{pct1(savingsRate)}</span></div>
-        <div className="sub mt">Joint account covers shared housing costs; Charlotte contributes €1.000/maand to joint ING account.</div>
+        {lens === 'ours' && <div className="kv"><span className="k">Buffer building in joint / mnd</span><span className={'v ' + (jointBuffer >= 0 ? 'green' : 'red')}>{fmt(jointBuffer)}</span></div>}
+        <div className="sub mt">{lens === 'charlotte'
+          ? 'Charlotte just started work — treat her take-home as provisional for a few months.'
+          : lens === 'ours'
+            ? 'Household: both incomes minus shared costs, Sven\u2019s personal costs and variable spend. The joint buffer stays in Revolut.'
+            : 'Your view: income minus your joint contribution, personal fixed costs and variable spend.'}</div>
       </div>
 
       <SpendingInsights data={data}/>
@@ -4165,7 +4252,7 @@ function FinanceModel(){
       <main key={tab}>
         {tab === 'networth' && <NetWorthTab data={data} setData={setData} lens={lens}/>}
         {tab === 'fire'     && <FireTab data={data} setData={setData}/>}
-        {tab === 'budget'   && <BudgetTab data={data} setData={setData}/>}
+        {tab === 'budget'   && <BudgetTab data={data} setData={setData} lens={lens}/>}
         {tab === 'goals'    && <GoalsTab data={data} setData={setData} lens={lens}/>}
         {tab === 'portfolio'&& <PortfolioTab data={data} setData={setData} lens={lens}/>}
         {tab === 'property' && <PropertyTab data={data} setData={setData} lens={lens}/>}
