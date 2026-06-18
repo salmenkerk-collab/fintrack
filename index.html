@@ -1237,7 +1237,7 @@ function FireTab({ data, setData, lens = 'sven' }){
   if (lens !== 'sven') return <PeopleFireView data={data} setData={setData} lens={lens}/>;
   const fp = data.fireParams;
   const liquid = data.assets
-    .filter(a => a.category !== 'property')
+    .filter(a => a.category !== 'property' && lensMatch(a.owner, lens))
     .reduce((s,a) => s + a.value, 0);
 
   const setFP = (k, v) => setData({ ...data, fireParams: { ...fp, [k]: v } });
@@ -1501,10 +1501,10 @@ const monthlyEq = c =>
   c.frequency === 'one-off'   ? 0 : c.amount;
 const ACCOUNT_LABELS = { sven:'Sven', charlotte:'Charlotte', joint:'Joint' };
 
-function MonthCompare({ data, mk }){
+function MonthCompare({ data, mk, lens = 'sven' }){
   const pk = prevMonthKey(mk);
   const sumFor = (m, cid) => (data.transactions || [])
-    .filter(t => !t.isTransfer && t.amount < 0 && t.date.slice(0,7) === m && t.categoryId === cid)
+    .filter(t => !t.isTransfer && t.amount < 0 && t.date.slice(0,7) === m && t.categoryId === cid && lensMatch(t.account, lens))
     .reduce((s,t) => s + Math.abs(t.amount), 0);
   const rows = budgetCats(data).filter(c => c.type === 'variable').map(c => ({
     c, cur: sumFor(mk, c.id), prev: sumFor(pk, c.id),
@@ -1908,7 +1908,7 @@ function BudgetTab({ data, setData, lens = 'sven' }){
             </React.Fragment>}
       </div>
 
-      <MonthCompare data={data} mk={mk}/>
+      <MonthCompare data={data} mk={mk} lens={lens}/>
 
       <div className="card">
         <h2>Month summary{lens === 'sven' ? '' : ' · ' + (lens === 'ours' ? 'Ours' : 'Charlotte')}</h2>
@@ -1946,7 +1946,7 @@ function BudgetTab({ data, setData, lens = 'sven' }){
             : 'Your view: income minus your joint contribution, personal fixed costs and variable spend.'}</div>
       </div>
 
-      <SpendingInsights data={data}/>
+      <SpendingInsights data={data} lens={lens}/>
 
       {showImport && <ImportModal data={data} onClose={() => setShowImport(false)} onCommit={commitImport}/>}
     </div>
@@ -2469,7 +2469,7 @@ function monthsBetween(d1, d2){
   return Math.max(1, (b.getFullYear()-a.getFullYear())*12 + (b.getMonth()-a.getMonth()));
 }
 
-function HistoryTab({ data, setData }){
+function HistoryTab({ data, setData, lens = 'sven' }){
   const fileRef = useRef(null);
   const snaps = [...(data.snapshots||[])].sort((a,b) => a.date.localeCompare(b.date));
 
@@ -2532,10 +2532,10 @@ function HistoryTab({ data, setData }){
     const worst = deltas.reduce((a,b) => b.delta < a.delta ? b : a);
     const cagr = first.liquidNW > 0 ? (Math.pow(last.liquidNW/first.liquidNW, 12/span) - 1) * 100 : 0;
     return renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap, editSnap,
-      fileRef, data, setData,
+      fileRef, data, setData, lens,
       stats: { avg3, growth12, span, best, worst, cagr } });
   }
-  return renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap, editSnap, fileRef, data, setData, stats });
+  return renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap, editSnap, fileRef, data, setData, stats, lens });
 }
 
 function doBackup(data){
@@ -2547,7 +2547,7 @@ function doBackup(data){
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
-function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap, editSnap, fileRef, data, setData, stats }){
+function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap, editSnap, fileRef, data, setData, stats, lens }){
   const onRestore = e => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -2580,6 +2580,7 @@ function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap
           </div>
         </div>
         <div className="sub">One snapshot per month — saving again in the same month overwrites it.</div>
+        {lens && lens !== 'ours' && <div className="sub" style={{marginTop:4}}>This tracks <b>total household</b> net worth — snapshots are stored as aggregates, so History isn't split by person.</div>}
       </div>
 
       {snaps.length === 0 && (
@@ -3886,10 +3887,10 @@ function detectSubscriptions(transactions){
   return subs.sort((a,b) => b.monthly - a.monthly);
 }
 
-function SpendingInsights({ data }){
+function SpendingInsights({ data, lens = 'sven' }){
   const cats = (data.categories||[]).filter(c => c.type === 'variable');
   const byMonth = {};
-  (data.transactions||[]).filter(t => t.amount < 0 && !t.isTransfer && catOf(data, t.categoryId).type === 'variable')
+  (data.transactions||[]).filter(t => t.amount < 0 && !t.isTransfer && catOf(data, t.categoryId).type === 'variable' && lensMatch(t.account, lens))
     .forEach(t => {
       const mk = t.date.slice(0,7);
       byMonth[mk] = byMonth[mk] || {};
@@ -3901,7 +3902,7 @@ function SpendingInsights({ data }){
     cats.forEach(c => { row[c.id] = Math.round(((byMonth[mk] || {})[c.id] || 0) * 100) / 100; });
     return row;
   });
-  const subs = detectSubscriptions(data.transactions);
+  const subs = detectSubscriptions((data.transactions || []).filter(t => lensMatch(t.account, lens)));
   const subTotal = subs.reduce((s,x) => s + x.monthly, 0);
 
   if (months.length === 0 && subs.length === 0) return null;
@@ -4003,11 +4004,20 @@ function GoalsTab({ data, setData, lens = 'sven' }){
   };
   const del = id => setGoals(goals.filter(g => g.id !== id));
 
-  /* honest "free to save" estimate, consistent with the Budget tab's surplus */
-  const totalIn = ((data.income || {}).sven || 0) + ((data.income || {}).jointContribution || 0);
-  const monthlyFixed = (data.fixedCosts || []).reduce((s, c) => s + monthlyEq(c), 0);
+  /* honest "free to save" estimate, consistent with the Budget tab's surplus — lens-aware */
+  const gHH = data.household || {};
+  const gContribEach = gHH.jointContribEach != null ? gHH.jointContribEach : 1000;
+  const gFc = data.fixedCosts || [];
+  const gShared = gFc.filter(c => c.shared).reduce((s, c) => s + monthlyEq(c), 0);
+  const gPersonal = gFc.filter(c => !c.shared && lensMatch(c.owner, lens)).reduce((s, c) => s + monthlyEq(c), 0);
+  const totalIn = lens === 'charlotte' ? ((data.income || {}).charlotte || 0)
+    : lens === 'ours' ? (((data.income || {}).sven || 0) + ((data.income || {}).charlotte || 0))
+    : ((data.income || {}).sven || 0);
+  const monthlyFixed = lens === 'ours'
+    ? gShared + gFc.filter(c => !c.shared).reduce((s, c) => s + monthlyEq(c), 0)
+    : gContribEach + gPersonal;
   const varByMonth = {};
-  (data.transactions || []).filter(t => t.amount < 0 && !t.isTransfer && catOf(data, t.categoryId).type === 'variable')
+  (data.transactions || []).filter(t => t.amount < 0 && !t.isTransfer && catOf(data, t.categoryId).type === 'variable' && lensMatch(t.account, lens))
     .forEach(t => { const mk = t.date.slice(0,7); varByMonth[mk] = (varByMonth[mk] || 0) + Math.abs(t.amount); });
   const varMonths = Object.keys(varByMonth);
   const avgVar = varMonths.length ? varMonths.reduce((s, m) => s + varByMonth[m], 0) / varMonths.length : null;
@@ -4436,7 +4446,7 @@ function FinanceModel(){
         {tab === 'goals'    && <GoalsTab data={data} setData={setData} lens={lens}/>}
         {tab === 'portfolio'&& <PortfolioTab data={data} setData={setData} lens={lens}/>}
         {tab === 'property' && <PropertyTab data={data} setData={setData} lens={lens}/>}
-        {tab === 'history'  && <HistoryTab data={data} setData={setData}/>}
+        {tab === 'history'  && <HistoryTab data={data} setData={setData} lens={lens}/>}
         {tab === 'settings' && <SettingsTab data={data} setData={setData} sync={sync}/>}
       </main>
     </div>
