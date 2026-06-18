@@ -421,7 +421,7 @@ function seedData(){
       annualWithdrawal:30000, swr:4,
       aowEnabled:false, aowAge:70, aowAnnualGross:13673, aowBuildPct:100,
       householdSpend:0, rentalHaircut:25,
-      pension: { enabled:true, startAge:68, accrualFactor:60,
+      pension: { enabled:true, startAge:70, accrualFactor:60,
         sven:      { safeNet:1110, employerNet:2045 },
         charlotte: { safeNet:799,  employerNet:2996 } },
     },
@@ -508,8 +508,9 @@ function migrate(d){
     if (fpd.aowBuildPct === undefined) fpd.aowBuildPct = 100;
     if (fpd.householdSpend === undefined) fpd.householdSpend = 0;
     if (fpd.rentalHaircut === undefined) fpd.rentalHaircut = 25;
-    if (fpd.pension === undefined) fpd.pension = { enabled:true, startAge:68, accrualFactor:60,
+    if (fpd.pension === undefined) fpd.pension = { enabled:true, startAge:70, accrualFactor:60,
       sven:{ safeNet:1110, employerNet:2045 }, charlotte:{ safeNet:799, employerNet:2996 } };
+    if (fpd.pension && d.settings && !d.settings._pensionAge70V1){ fpd.pension.startAge = 70; d.settings._pensionAge70V1 = true; }
   }
   if (!Array.isArray(d.goals)) d.goals = [{ id:'goal-car-2028', name:'New car', icon:'🚗', target:25000, targetDate:'2028-06', saved:0, monthly:0 }];
   /* one-time retro: tag already-imported broker funding (Flatex / DEGIRO / Trade Republic)
@@ -1147,7 +1148,7 @@ function PeopleFireView({ data, setData, lens }){
   // for life, so the portfolio only has to fund the years between retiring and 68.
   const pen = fp.pension || {};
   const penOn = pen.enabled !== false;
-  const startAge = pen.startAge || 68;
+  const startAge = pen.startAge || 70;
   const factor = (pen.accrualFactor != null ? pen.accrualFactor : 60) / 100;   // employer pension surviving early retirement
   const penPerson = id => { const pp = pen[id] || {}; return ((pp.safeNet || 0) + (pp.employerNet || 0) * factor) * 12; };
   const pensionNetY = penOn ? people.reduce((s,pp) => s + penPerson(pp[0]), 0) : 0;
@@ -1220,12 +1221,23 @@ function PeopleFireView({ data, setData, lens }){
             <div className="kv"><span className="k">Bridge length</span><span className="v">{bridgeYears} yrs ({retireAge}\u2192{startAge})</span></div>
             <div className="kv"><span className="k">FIRE number (bridge fund)</span><span className="v" style={{fontWeight:800}}>{fmt0(fireNumber)}</span></div>
             <div className="kv"><span className="k">Invested so far</span><span className="v">{fmt0(liquid)}</span></div>
-            <div className="kv"><span className="k">% to FI</span><span className="v">{pct1(pctToFI)}</span></div>
             <div className="kv"><span className="k">On track to bridge by</span><span className="v">{fireAgeBridge !== null ? 'age ' + fireAgeBridge : '> horizon'}</span></div>
           </div>
         </div>
-        <div className="mt" style={{height:10, borderRadius:6, background:'var(--surface2)', overflow:'hidden'}}>
-          <div style={{height:'100%', width:Math.min(100, pctToFI) + '%', background:'var(--green)', borderRadius:6, transition:'width .5s'}}/>
+        <div className="spread mt" style={{alignItems:'flex-end', flexWrap:'wrap', gap:8}}>
+          <div>
+            <div className="metric green" style={{marginBottom:0}}><CountUp value={pctToFI} format={pct1}/></div>
+            <div className="sub">of your {fmt0(fireNumber)} bridge fund (today\u2019s \u20ac)</div>
+          </div>
+          <div className="num muted">{fmt0(liquid)} / {fmt0(fireNumber)}</div>
+        </div>
+        <div style={{position:'relative', height:14, background:'var(--bg)', borderRadius:8, marginTop:14}}>
+          <div style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
+            background:'linear-gradient(90deg,#4A211C,#5E6B3B)', borderRadius:8, transition:'width .4s'}}/>
+        </div>
+        <div className="spread" style={{marginTop:6}}>
+          <span className="small dim">\u20ac0</span>
+          <span className="small dim">{fmt0(fireNumber)}</span>
         </div>
         {spendIsDerived && <div className="sub mt">Spend is estimated from your fixed costs ({fmt0(budgetFixedAnnual)}/yr) and leaves out discretionary spending — set your real household figure above.</div>}
         {penOn &&
