@@ -415,7 +415,7 @@ function seedData(){
         monthlyPayment:471, interestRate:2.32, note:'', lastUpdated:now },
     ],
     fireParams: {
-      birthYear:1997, targetAge:52, monthlyContribution:800, contributionSchedule:[],
+      birthYear:1997, targetAge:52, monthlyContribution:800, charlotteContribution:0, contributionSchedule:[],
       grossReturn:7, inflation:2.5,
       box3FictitiousReturn:6.17, box3TaxRate:36, box3Exempt:57000,
       annualWithdrawal:30000, swr:4,
@@ -503,6 +503,7 @@ function migrate(d){
   if (d.fireParams){
     const fpd = d.fireParams;
     if (fpd.aowEnabled === undefined) fpd.aowEnabled = false;
+    if (fpd.charlotteContribution === undefined) fpd.charlotteContribution = 0;
     if (fpd.aowAge === undefined) fpd.aowAge = 70;
     if (fpd.aowAnnualGross === undefined) fpd.aowAnnualGross = 13673;
     if (fpd.aowBuildPct === undefined) fpd.aowBuildPct = 100;
@@ -858,7 +859,7 @@ function NetWorthTab({ data, setData, lens = 'sven' }){
                 <span style={{fontWeight:600, color:'var(--ink)'}}>{'\u00a3 \u2192 \u20ac'}</span>
                 <NumInput value={(data.fx && data.fx.GBP) || 1.17} step={0.01} width={84} onChange={setFxRate}/>
                 <button className="btn" onClick={refreshFx}>{'\u21bb Live rate'}</button>
-                <span className="dim">ECB daily \u00b7 used for Charlotte's London housing</span>
+                <span className="dim">ECB daily · used for Charlotte's London housing</span>
               </div>
             )}
             {ASSET_CATS.map(cat => {
@@ -1098,6 +1099,7 @@ function monthlyNeeded(startNW, fp){
 }
 
 function PeopleFireView({ data, setData, lens }){
+  const [showRE, setShowRE] = useState(false);
   const fp = data.fireParams;
   const fxRate = (data.fx && data.fx.GBP) || 1.17;
   const A = (data.assets || []).filter(a => lensMatch(a.owner, lens));
@@ -1144,33 +1146,41 @@ function PeopleFireView({ data, setData, lens }){
   const householdSpend = (fp.householdSpend && fp.householdSpend > 0) ? fp.householdSpend : budgetFixedAnnual;
   const spendIsDerived = !(fp.householdSpend && fp.householdSpend > 0);
 
-  // FIRE here is a BRIDGE, not a forever-pot: from ~68 AOW + employer pensions (with rent) cover spend
-  // for life, so the portfolio only has to fund the years between retiring and 68.
+  // FI-FIRST: the headline is a clean, self-funded target — annual spend / SWR (the 4% rule).
+  // Nothing leaned on. Pensions + rental only matter for RE timing, in the collapsed section below.
+  const fiNumber = Math.round(householdSpend / (fp.swr / 100));
+  const xMult = Math.round(1 / (fp.swr / 100));
+
+  const svenContribM = Number(fp.monthlyContribution) || 0;
+  const charContribM = Number(fp.charlotteContribution) || 0;
+  const hhContribM = lens === 'ours' ? (svenContribM + charContribM) : (lens === 'charlotte' ? charContribM : svenContribM);
+
+  const fiFp = { ...fp, contributionSchedule: [], monthlyContribution: hhContribM,
+                 annualWithdrawal: householdSpend, aowEnabled: false };
+  const sim = simulate(liquid, fiFp, fp.grossReturn, fp.inflation);   // sim.fireNumber === fiNumber
+  const pctToFI = fiNumber > 0 ? Math.min(100, liquid / fiNumber * 100) : 100;
+  const chartRows = sim.rows.filter(r => r.year <= sim.targetYear);
+  const incomeM = lens === 'ours' ? (((data.income||{}).sven||0) + ((data.income||{}).charlotte||0)) : (((data.income||{})[lens]) || 0);
+  const investRate = incomeM > 0 ? Math.min(100, hhContribM / incomeM * 100) : null;
+
+  // ---- RE machinery (pensions + rental + bridge): demoted, for later ----
   const pen = fp.pension || {};
   const penOn = pen.enabled !== false;
   const startAge = pen.startAge || 70;
-  const factor = (pen.accrualFactor != null ? pen.accrualFactor : 60) / 100;   // employer pension surviving early retirement
+  const factor = (pen.accrualFactor != null ? pen.accrualFactor : 60) / 100;
   const penPerson = id => { const pp = pen[id] || {}; return ((pp.safeNet || 0) + (pp.employerNet || 0) * factor) * 12; };
   const pensionNetY = penOn ? people.reduce((s,pp) => s + penPerson(pp[0]), 0) : 0;
-
   const retireAge = fp.targetAge;
   const realR = Math.max(0.0001, (fp.grossReturn - fp.inflation) / 100);
   const bridgeYears = Math.max(0, startAge - retireAge);
-  const spendGapBridge = Math.max(0, householdSpend - rentNetY);                // portfolio carries this until pensions start
-  const spendGapLate = Math.max(0, householdSpend - rentNetY - pensionNetY);    // any shortfall that outlives the pensions
+  const spendGapBridge = Math.max(0, householdSpend - rentNetY);
+  const spendGapLate = Math.max(0, householdSpend - rentNetY - pensionNetY);
   const annuityPV = spendGapBridge * (1 - Math.pow(1 + realR, -bridgeYears)) / realR;
   const latePV = (spendGapLate / (fp.swr / 100)) / Math.pow(1 + realR, bridgeYears);
-  const fireNumber = Math.round(annuityPV + latePV);
+  const bridgeFund = Math.round(annuityPV + latePV);
+  const hitBridge = sim.rows.find(r => r.nominal >= bridgeFund);
+  const fireAgeBridge = hitBridge ? hitBridge.age : null;
 
-  const contribEachMonth = lens === 'ours' ? fp.monthlyContribution : 0;   // only Sven invests today
-  const hhFp = { ...fp, contributionSchedule: [], monthlyContribution: contribEachMonth,
-                 annualWithdrawal: spendGapBridge, aowEnabled: false };
-  const sim = simulate(liquid, hhFp, fp.grossReturn, fp.inflation);
-  const hit = sim.rows.find(r => r.nominal >= fireNumber);
-  const fireAgeBridge = hit ? hit.age : null;
-  const pctToFI = fireNumber > 0 ? Math.min(100, liquid / fireNumber * 100) : 100;
-  const chartRows = sim.rows.filter(r => r.year <= sim.targetYear);
-  const title = lens === 'ours' ? 'Household FIRE \u00b7 Ours' : (OWNERS[lens] || 'Charlotte') + ' \u2014 FIRE';
   const setFP = (k,v) => setData({ ...data, fireParams: { ...fp, [k]: v } });
   const setPen = (id,k,v) => setData({ ...data, fireParams: { ...fp, pension: { ...pen, [id]: { ...(pen[id]||{}), [k]: v } } } });
   const setPenTop = (k,v) => setData({ ...data, fireParams: { ...fp, pension: { ...pen, [k]: v } } });
@@ -1201,78 +1211,94 @@ function PeopleFireView({ data, setData, lens }){
 
       <div className="grid3">
         <div className="card"><h3>Investable pot</h3><div className="metric">{fmt0(liquid)}</div><div className="sub">Stocks, crypto & savings{lens === 'ours' ? ' (both)' : ''}</div></div>
-        <div className="card"><h3>Property equity</h3><div className="metric">{fmt0(propEquity)}</div><div className="sub">The \u201cstones\u201d \u00b7 value minus mortgages</div></div>
+        <div className="card"><h3>Property equity</h3><div className="metric">{fmt0(propEquity)}</div><div className="sub">The “stones” · value minus mortgages</div></div>
         <div className="card"><h3>Net worth</h3><div className="metric">{fmt0(netWorth)}</div><div className="sub">Pot + property equity</div></div>
       </div>
 
       <div className="card">
-        <h2>{title}</h2>
+        <h2>{lens === 'ours' ? 'Financial independence · Ours' : (OWNERS[lens] || 'Charlotte') + ' — financial independence'}</h2>
+        <div className="sub mb">Your investable pot against a clean FI number: annual spend × {xMult} (the {fp.swr}% rule). Nothing leaned on — just “could our investments carry us, full stop.” Pensions and rent are an RE timing bonus, tucked below.</div>
         <div className="grid2">
           <div>
             <div className="kv"><span className="k">Household spend / yr</span>
               <span className="v"><NumInput value={householdSpend} step={500} width={110} onChange={v => setFP('householdSpend', v)}/></span></div>
-            <div className="kv"><span className="k">Rental income (gross / yr)</span><span className="v">{fmt0(rentGrossY)}</span></div>
-            <div className="kv"><span className="k">Rental costs / tax haircut</span>
-              <span className="v"><NumInput value={haircut} step={5} width={62} onChange={v => setFP('rentalHaircut', v)}/> %</span></div>
-            <div className="kv"><span className="k">Net rental (spendable)</span><span className="v green">{fmt0(rentNetY)}</span></div>
+            <div className="kv"><span className="k">FI number (spend × {xMult})</span><span className="v" style={{fontWeight:800}}>{fmt0(fiNumber)}</span></div>
+            <div className="kv"><span className="k">Investable pot</span><span className="v">{fmt0(liquid)}</span></div>
+            {investRate !== null && <div className="kv"><span className="k">Investing rate</span><span className="v">{pct1(investRate)}</span></div>}
           </div>
           <div>
-            <div className="kv"><span className="k">Bridge gap / yr</span><span className="v">{fmt0(spendGapBridge)}</span></div>
-            <div className="kv"><span className="k">Bridge length</span><span className="v">{bridgeYears} yrs ({retireAge}\u2192{startAge})</span></div>
-            <div className="kv"><span className="k">FIRE number (bridge fund)</span><span className="v" style={{fontWeight:800}}>{fmt0(fireNumber)}</span></div>
-            <div className="kv"><span className="k">Invested so far</span><span className="v">{fmt0(liquid)}</span></div>
-            <div className="kv"><span className="k">On track to bridge by</span><span className="v">{fireAgeBridge !== null ? 'age ' + fireAgeBridge : '> horizon'}</span></div>
+            <div className="kv"><span className="k">Sven invests / mo</span><span className="v"><NumInput value={svenContribM} step={50} width={90} onChange={v => setFP('monthlyContribution', v)}/></span></div>
+            {lens === 'ours' && <div className="kv"><span className="k">Charlotte invests / mo</span><span className="v"><NumInput value={charContribM} step={50} width={90} onChange={v => setFP('charlotteContribution', v)}/></span></div>}
+            <div className="kv"><span className="k">On track to FI by</span><span className="v">{sim.fireAge !== null ? 'age ' + sim.fireAge : '> horizon'}</span></div>
+            <div className="kv"><span className="k">Coast FI by</span><span className="v">{sim.coastAge !== null ? 'age ' + sim.coastAge : '—'}</span></div>
           </div>
         </div>
         <div className="spread mt" style={{alignItems:'flex-end', flexWrap:'wrap', gap:8}}>
           <div>
             <div className="metric green" style={{marginBottom:0}}><CountUp value={pctToFI} format={pct1}/></div>
-            <div className="sub">of your {fmt0(fireNumber)} bridge fund (today\u2019s \u20ac)</div>
+            <div className="sub">of your {fmt0(fiNumber)} FI number (today’s €)</div>
           </div>
-          <div className="num muted">{fmt0(liquid)} / {fmt0(fireNumber)}</div>
+          <div className="num muted">{fmt0(liquid)} / {fmt0(fiNumber)}</div>
         </div>
         <div style={{position:'relative', height:14, background:'var(--bg)', borderRadius:8, marginTop:14}}>
           <div style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
             background:'linear-gradient(90deg,#4A211C,#5E6B3B)', borderRadius:8, transition:'width .4s'}}/>
         </div>
         <div className="spread" style={{marginTop:6}}>
-          <span className="small dim">\u20ac0</span>
-          <span className="small dim">{fmt0(fireNumber)}</span>
+          <span className="small dim">€0</span>
+          <span className="small dim">{fmt0(fiNumber)}</span>
         </div>
         {spendIsDerived && <div className="sub mt">Spend is estimated from your fixed costs ({fmt0(budgetFixedAnnual)}/yr) and leaves out discretionary spending — set your real household figure above.</div>}
-        {penOn &&
-          <div className="sub mt">From age {startAge}, AOW + employer pensions pay ~<b>{fmt0(pensionNetY)}/yr</b> net{rentNetY > 0 ? (', and net rent adds ~' + fmt0(rentNetY) + '/yr') : ''} \u2014 {spendGapLate <= 0
-            ? <React.Fragment>more than the {fmt0(householdSpend)} you spend, so the portfolio carries <b>nothing</b> after {startAge}.</React.Fragment>
-            : <React.Fragment>leaving ~{fmt0(spendGapLate)}/yr for the portfolio to top up for life.</React.Fragment>} So the FIRE number is mostly the <b>{bridgeYears}-year bridge</b> from {retireAge} to {startAge}.</div>}
-        <div className="sub mt">Employer pensions count at {pen.accrualFactor != null ? pen.accrualFactor : 60}% of the work-to-67 projection (retiring at {retireAge} freezes them early); AOW is residency-based \u2014 safe if you stay in NL. Property equity is the rental engine, so it stays out of the FIRE number.</div>
+        <div className="sub mt">Charlotte’s flat counts as <b>equity</b>, not lifelong income — if she sells it to help buy a home, the rent stops but the equity rolls into property. So it sits on the balance sheet (net worth), not inside this number.</div>
       </div>
 
       {lens === 'ours' &&
       <div className="card">
-        <h3>Pension from age {startAge} \u00b7 net per month</h3>
-        <div className="sub mb">AOW + locked old pots are safe; the employer figure is your current fund\u2019s work-to-67 projection, scaled by the accrual factor because retiring early freezes it. All editable \u2014 refine when you have exact numbers.</div>
-        <div className="grid2">
-          {[['sven','Sven'],['charlotte','Charlotte']].map(pp => {
-            const id = pp[0], pd = pen[id] || {};
-            return (
-              <div key={id} style={{marginBottom:8}}>
-                <div style={{fontWeight:700, marginBottom:4}}>{pp[1]}</div>
-                <div className="kv"><span className="k">AOW + locked</span><span className="v"><NumInput value={pd.safeNet || 0} step={25} width={90} onChange={v => setPen(id,'safeNet',v)} suffix="/mnd"/></span></div>
-                <div className="kv"><span className="k">Current employer</span><span className="v"><NumInput value={pd.employerNet || 0} step={50} width={90} onChange={v => setPen(id,'employerNet',v)} suffix="/mnd"/></span></div>
-                <div className="kv"><span className="k">\u2192 counts as</span><span className="v green">{fmt0(penPerson(id))}/yr</span></div>
-              </div>
-            );
-          })}
+        <div className="spread" style={{cursor:'pointer', userSelect:'none'}} onClick={() => setShowRE(s => !s)}>
+          <h3 style={{margin:0}}>When could you actually retire? <span className="dim small">(RE — for later)</span></h3>
+          <span className="dim">{showRE ? '▲' : '▼'}</span>
         </div>
-        <div className="row" style={{gap:18, flexWrap:'wrap', marginTop:6}}>
-          <label className="kv" style={{flex:'0 0 auto'}}><span className="k">Accrual factor</span> <NumInput value={pen.accrualFactor != null ? pen.accrualFactor : 60} step={5} width={58} onChange={v => setPenTop('accrualFactor',v)} suffix="%"/></label>
-          <label className="kv" style={{flex:'0 0 auto'}}><span className="k">Pensions start at age</span> <NumInput value={startAge} step={1} width={52} onChange={v => setPenTop('startAge',v)}/></label>
-        </div>
+        {showRE && <React.Fragment>
+          <div className="sub mt">Once you pick a stop age, pensions (and rent, <i>if</i> the flat is kept) cover spend from age {startAge}, so the portfolio only funds the bridge until then. This is the early-retirement optimisation — it shrinks the number, but don’t lean on it yet.</div>
+          <div className="grid2 mt">
+            <div>
+              <div className="kv"><span className="k">Retire age</span><span className="v"><NumInput value={fp.targetAge} step={1} width={56} onChange={v => setFP('targetAge', v)}/></span></div>
+              <div className="kv"><span className="k">Bridge length</span><span className="v">{bridgeYears} yrs ({retireAge}→{startAge})</span></div>
+              <div className="kv"><span className="k">Net rental (if flat kept)</span><span className="v green">{fmt0(rentNetY)}/yr</span></div>
+              <div className="kv"><span className="k">Pensions from {startAge}</span><span className="v green">{fmt0(pensionNetY)}/yr</span></div>
+            </div>
+            <div>
+              <div className="kv"><span className="k">Bridge gap / yr</span><span className="v">{fmt0(spendGapBridge)}</span></div>
+              <div className="kv"><span className="k">Bridge fund needed</span><span className="v" style={{fontWeight:800}}>{fmt0(bridgeFund)}</span></div>
+              <div className="kv"><span className="k">Pot reaches it by</span><span className="v">{fireAgeBridge !== null ? 'age ' + fireAgeBridge : '> horizon'}</span></div>
+              <div className="kv"><span className="k">Rental haircut</span><span className="v"><NumInput value={haircut} step={5} width={62} onChange={v => setFP('rentalHaircut', v)}/> %</span></div>
+            </div>
+          </div>
+          <h4 style={{margin:'14px 0 4px'}}>Pension from age {startAge} · net per month</h4>
+          <div className="sub mb">AOW + locked old pots are safe; the employer figure is the work-to-67 projection scaled by the accrual factor, since retiring early freezes it.</div>
+          <div className="grid2">
+            {[['sven','Sven'],['charlotte','Charlotte']].map(pp => {
+              const id = pp[0], pd = pen[id] || {};
+              return (
+                <div key={id} style={{marginBottom:8}}>
+                  <div style={{fontWeight:700, marginBottom:4}}>{pp[1]}</div>
+                  <div className="kv"><span className="k">AOW + locked</span><span className="v"><NumInput value={pd.safeNet || 0} step={25} width={90} onChange={v => setPen(id,'safeNet',v)} suffix="/mnd"/></span></div>
+                  <div className="kv"><span className="k">Current employer</span><span className="v"><NumInput value={pd.employerNet || 0} step={50} width={90} onChange={v => setPen(id,'employerNet',v)} suffix="/mnd"/></span></div>
+                  <div className="kv"><span className="k">→ counts as</span><span className="v green">{fmt0(penPerson(id))}/yr</span></div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="row" style={{gap:18, flexWrap:'wrap', marginTop:6}}>
+            <label className="kv" style={{flex:'0 0 auto'}}><span className="k">Accrual factor</span> <NumInput value={pen.accrualFactor != null ? pen.accrualFactor : 60} step={5} width={58} onChange={v => setPenTop('accrualFactor',v)} suffix="%"/></label>
+            <label className="kv" style={{flex:'0 0 auto'}}><span className="k">Pensions start at age</span> <NumInput value={startAge} step={1} width={52} onChange={v => setPenTop('startAge',v)}/></label>
+          </div>
+        </React.Fragment>}
       </div>}
 
       {chartRows.length > 1 &&
         <div className="card">
-          <h3>Combined pot vs target</h3>
+          <h3>Pot vs FI target</h3>
           <div style={{width:'100%', height:240}}>
             <ResponsiveContainer>
               <AreaChart data={chartRows} margin={{top:8,right:12,left:4,bottom:0}}>
@@ -1284,7 +1310,7 @@ function PeopleFireView({ data, setData, lens }){
                 <XAxis dataKey="age" tick={{fontSize:11, fill:'var(--muted)'}}/>
                 <YAxis tickFormatter={v => '\u20ac' + Math.round(v/1000) + 'k'} tick={{fontSize:11, fill:'var(--muted)'}} width={48}/>
                 <Tooltip formatter={v => fmt0(v)} labelFormatter={a => 'Age ' + a}/>
-                <ReferenceLine y={fireNumber} stroke="var(--red)" strokeDasharray="5 4" label={{value:'FIRE', fontSize:10, fill:'var(--red)'}}/>
+                <ReferenceLine y={fiNumber} stroke="var(--red)" strokeDasharray="5 4" label={{value:'FI', fontSize:10, fill:'var(--red)'}}/>
                 <Area type="monotone" dataKey="nominal" stroke="var(--green)" strokeWidth={2} fill="url(#hhg)"/>
               </AreaChart>
             </ResponsiveContainer>
@@ -1313,14 +1339,15 @@ function FireTab({ data, setData, lens = 'sven' }){
   const removeStep = i => setSched(sched.filter((s, j) => j !== i));
 
   const base = simulate(liquid, fp, fp.grossReturn, fp.inflation);
+  const baseFI = simulate(liquid, { ...fp, aowEnabled: false }, fp.grossReturn, fp.inflation);  // pure FI: spend / SWR, nothing leaned on
   const pess = simulate(liquid, fp, 5, 3);
   const opt  = simulate(liquid, fp, 9, 2);
   const needed = monthlyNeeded(liquid, fp);
 
-  const yearsToTarget = Math.max(base.targetYear - base.startYear, 0);
-  const coastNumberToday = base.fireAtTarget / Math.pow(1 + fp.grossReturn/100, yearsToTarget);
-  const pctToFI = base.fireNumber > 0 ? liquid / base.fireNumber * 100 : 0;
-  const coastPct = base.fireNumber > 0 ? Math.min(100, coastNumberToday / base.fireNumber * 100) : 0;
+  const yearsToTarget = Math.max(baseFI.targetYear - baseFI.startYear, 0);
+  const coastNumberToday = baseFI.fireAtTarget / Math.pow(1 + fp.grossReturn/100, yearsToTarget);
+  const pctToFI = baseFI.fireNumber > 0 ? liquid / baseFI.fireNumber * 100 : 0;
+  const coastPct = baseFI.fireNumber > 0 ? Math.min(100, coastNumberToday / baseFI.fireNumber * 100) : 0;
   const isCoast = liquid >= coastNumberToday;
 
   const chartRows = base.rows.filter(r => r.year <= base.targetYear);
@@ -1345,9 +1372,9 @@ function FireTab({ data, setData, lens = 'sven' }){
         <div className="spread" style={{alignItems:'flex-end', flexWrap:'wrap', gap:8}}>
           <div>
             <div className="metric green" style={{marginBottom:0}}><CountUp value={pctToFI} format={pct1}/></div>
-            <div className="sub">of your {fmt0(base.fireNumber)} FIRE number (today's €)</div>
+            <div className="sub">of your {fmt0(baseFI.fireNumber)} FI number — spend × {Math.round(1/(fp.swr/100))}, investments only</div>
           </div>
-          <div className="num muted">{fmt0(liquid)} / {fmt0(base.fireNumber)}</div>
+          <div className="num muted">{fmt0(liquid)} / {fmt0(baseFI.fireNumber)}</div>
         </div>
         <div style={{position:'relative', height:14, background:'var(--bg)', borderRadius:8, marginTop:14}}>
           <div style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
@@ -1357,25 +1384,26 @@ function FireTab({ data, setData, lens = 'sven' }){
         <div className="spread" style={{marginTop:6}}>
           <span className="small dim">€0</span>
           <span className="small" style={{color:'#B98A2E'}}>Coast FI · {fmt0(coastNumberToday)}</span>
-          <span className="small dim">{fmt0(base.fireNumber)}</span>
+          <span className="small dim">{fmt0(baseFI.fireNumber)}</span>
         </div>
+        <div className="sub mt">This is your pure FI target — investments carrying your spend forever. Your AOW + pensions mean the number you’d actually need to <i>stop early</i> is lower; that RE view lives in the Ours tab and the assumptions below.</div>
         <div className="grid2 mt">
           <div className="card" style={{background:'var(--bg)', borderColor: isCoast ? 'var(--green)' : 'var(--surface2)'}}>
             <h3>🪂 Coast FIRE</h3>
             {isCoast
               ? <div className="big green">Reached ✓</div>
-              : <div className="big num">{base.coastAge !== null ? 'Age ' + base.coastAge : '—'}</div>}
+              : <div className="big num">{baseFI.coastAge !== null ? 'Age ' + baseFI.coastAge : '—'}</div>}
             <div className="sub">{isCoast
               ? 'You could stop investing today and still reach your number by ' + fp.targetAge + ' on growth alone.'
-              : (base.coastYear ? 'On track to coast in ' + base.coastYear + ' — after that, contributing becomes optional.'
+              : (baseFI.coastYear ? 'On track to coast in ' + baseFI.coastYear + ' — after that, contributing becomes optional.'
                                 : 'Keep investing toward the coast point.')}</div>
             {!isCoast && <div className="sub">{fmt0(Math.max(0, coastNumberToday - liquid))} to go.</div>}
           </div>
           <div className="card" style={{background:'var(--bg)'}}>
             <h3>🎯 Full FIRE</h3>
-            <div className="big num">{base.fireAge !== null ? 'Age ' + base.fireAge : '> horizon'}</div>
-            <div className="sub">{base.yearsToFire !== null
-              ? base.yearsToFire + ' years to go · projected ' + base.fireYear
+            <div className="big num">{baseFI.fireAge !== null ? 'Age ' + baseFI.fireAge : '> horizon'}</div>
+            <div className="sub">{baseFI.yearsToFire !== null
+              ? baseFI.yearsToFire + ' years to go · projected ' + baseFI.fireYear
               : 'Not reached within the horizon at the current plan.'}</div>
           </div>
         </div>
@@ -1504,7 +1532,7 @@ function FireTab({ data, setData, lens = 'sven' }){
 
       <div className="grid3">
         <div className="card">
-          <h3>FIRE number</h3>
+          <h3>Early-retire target <span className="dim small">(AOW-reduced)</span></h3>
           <div className="metric"><CountUp value={base.fireNumber} format={fmt0}/></div>
           <div className="sub">In today's money · {fmt0(base.fireAtTarget)} nominal at age {fp.targetAge}</div>
           {fp.aowEnabled && <div className="sub" style={{marginTop:4}}>
