@@ -420,6 +420,7 @@ function seedData(){
       box3FictitiousReturn:6.17, box3TaxRate:36, box3Exempt:57000,
       annualWithdrawal:30000, swr:4,
       aowEnabled:false, aowAge:70, aowAnnualGross:13673, aowBuildPct:100,
+      householdSpend:0, rentalHaircut:25,
     },
     income: { sven:3671, charlotte:0, jointContribution:1000 },
     household: { jointContribEach:1000, sharedSplit:50 },
@@ -502,6 +503,8 @@ function migrate(d){
     if (fpd.aowAge === undefined) fpd.aowAge = 70;
     if (fpd.aowAnnualGross === undefined) fpd.aowAnnualGross = 13673;
     if (fpd.aowBuildPct === undefined) fpd.aowBuildPct = 100;
+    if (fpd.householdSpend === undefined) fpd.householdSpend = 0;
+    if (fpd.rentalHaircut === undefined) fpd.rentalHaircut = 25;
   }
   if (!Array.isArray(d.goals)) d.goals = [{ id:'goal-car-2028', name:'New car', icon:'🚗', target:25000, targetDate:'2028-06', saved:0, monthly:0 }];
   /* one-time retro: tag already-imported broker funding (Flatex / DEGIRO / Trade Republic)
@@ -1117,27 +1120,36 @@ function PeopleFireView({ data, setData, lens }){
   const propEquity = Math.max(0, propVal - debt);
   const netWorth = liquid + propEquity;
 
-  // net rental income (rent minus the property's own mortgage payment), annualised in EUR
-  let rentGrossY = 0, rentNetY = 0;
+  // net rental income (rent minus the property's own mortgage), annualised in EUR, then a costs/tax/vacancy haircut
+  let rentGrossY = 0, rentRawNetY = 0;
   A.filter(a => a.category === 'property' && a.rentGBP).forEach(a => {
     const r = a.currency === 'GBP' ? fxRate : 1;
     const mort = L.find(l => l.linkedAssetId === a.id);
     const pay = mort ? (mort.monthlyPayment || 0) : 0;
     rentGrossY += (a.rentGBP || 0) * 12 * r;
-    rentNetY  += Math.max(0, (a.rentGBP || 0) - pay) * 12 * r;
+    rentRawNetY += Math.max(0, (a.rentGBP || 0) - pay) * 12 * r;
   });
+  const haircut = fp.rentalHaircut != null ? fp.rentalHaircut : 25;        // tax, maintenance, vacancy, agent fees
+  const rentNetY = rentRawNetY * (1 - haircut / 100);
 
-  // household FIRE: rental covers part of spend now; portfolio must cover the rest; AOW reduces it further
-  const portfolioSpend = Math.max(0, fp.annualWithdrawal - rentNetY);
+  // household annual spend: derived from your fixed costs unless you set a figure.
+  // fixed costs exclude discretionary spending, so the derived figure is a conservative floor.
+  const budgetFixedAnnual = Math.round((data.fixedCosts || []).reduce((s,c) => s + monthlyEq(c), 0) * 12);
+  const householdSpend = (fp.householdSpend && fp.householdSpend > 0) ? fp.householdSpend : budgetFixedAnnual;
+  const spendIsDerived = !(fp.householdSpend && fp.householdSpend > 0);
+
+  // the portfolio only has to cover what the rental doesn't. AOW is DEFERRED income (age ~67-70):
+  // shown separately as a later boost, never baked in as a capital credit — so it can't fake "already FIRE".
+  const portfolioSpend = Math.max(0, householdSpend - rentNetY);
   const contribEachMonth = lens === 'ours' ? fp.monthlyContribution : 0;   // only Sven invests today
-  const aowGrossEach = (fp.aowEnabled ? fp.aowAnnualGross : 0);
-  const aowGrossTotal = aowGrossEach * (lens === 'ours' ? 2 : 1);          // couple = two streams
   const hhFp = { ...fp, contributionSchedule: [], monthlyContribution: contribEachMonth,
-                 annualWithdrawal: portfolioSpend, aowAnnualGross: aowGrossTotal };
+                 annualWithdrawal: portfolioSpend, aowEnabled: false };
   const sim = simulate(liquid, hhFp, fp.grossReturn, fp.inflation);
+  const aowCoupleY = (fp.aowEnabled ? (fp.aowAnnualGross * (fp.aowBuildPct || 100) / 100) : 0) * (lens === 'ours' ? 2 : 1);
   const pctToFI = sim.fireNumber > 0 ? Math.min(100, liquid / sim.fireNumber * 100) : 100;
   const chartRows = sim.rows.filter(r => r.year <= sim.targetYear);
   const title = lens === 'ours' ? 'Household FIRE \u00b7 Ours' : (OWNERS[lens] || 'Charlotte') + ' \u2014 FIRE';
+  const setFP = (k,v) => setData({ ...data, fireParams: { ...fp, [k]: v } });
 
   return (
     <div className="stack">
@@ -1173,22 +1185,28 @@ function PeopleFireView({ data, setData, lens }){
         <h2>{title}</h2>
         <div className="grid2">
           <div>
-            <div className="kv"><span className="k">Net rental income / yr</span><span className="v green">{fmt0(rentNetY)}</span></div>
-            <div className="kv"><span className="k">Household spend assumption / yr</span><span className="v">{fmt0(fp.annualWithdrawal)}</span></div>
-            <div className="kv"><span className="k">Portfolio must cover / yr</span><span className="v">{fmt0(portfolioSpend)}</span></div>
-            <div className="kv"><span className="k">FIRE number (portfolio)</span><span className="v">{fmt0(sim.fireNumber)}</span></div>
+            <div className="kv"><span className="k">Household spend / yr</span>
+              <span className="v"><NumInput value={householdSpend} step={500} width={110} onChange={v => setFP('householdSpend', v)}/></span></div>
+            <div className="kv"><span className="k">Rental income (gross / yr)</span><span className="v">{fmt0(rentGrossY)}</span></div>
+            <div className="kv"><span className="k">Rental costs / tax haircut</span>
+              <span className="v"><NumInput value={haircut} step={5} width={62} onChange={v => setFP('rentalHaircut', v)}/> %</span></div>
+            <div className="kv"><span className="k">Net rental (spendable)</span><span className="v green">{fmt0(rentNetY)}</span></div>
           </div>
           <div>
+            <div className="kv"><span className="k">Portfolio must cover / yr</span><span className="v">{fmt0(portfolioSpend)}</span></div>
+            <div className="kv"><span className="k">FIRE number (portfolio)</span><span className="v" style={{fontWeight:800}}>{fmt0(sim.fireNumber)}</span></div>
+            <div className="kv"><span className="k">Invested so far</span><span className="v">{fmt0(liquid)}</span></div>
             <div className="kv"><span className="k">% to FI</span><span className="v">{pct1(pctToFI)}</span></div>
-            <div className="kv"><span className="k">FIRE age</span><span className="v">{sim.fireAge !== null ? sim.fireAge : '> horizon'}</span></div>
-            <div className="kv"><span className="k">AOW counted</span><span className="v">{fp.aowEnabled ? (lens === 'ours' ? 'two streams' : 'one') : 'off'}</span></div>
-            <div className="kv"><span className="k">Monthly invested</span><span className="v">{fmt0(contribEachMonth)}</span></div>
+            <div className="kv"><span className="k">FIRE age (portfolio-only)</span><span className="v">{sim.fireAge !== null ? sim.fireAge : '> horizon'}</span></div>
           </div>
         </div>
         <div className="mt" style={{height:10, borderRadius:6, background:'var(--surface2)', overflow:'hidden'}}>
           <div style={{height:'100%', width:Math.min(100, pctToFI) + '%', background:'var(--green)', borderRadius:6, transition:'width .5s'}}/>
         </div>
-        <div className="sub mt">Charlotte\u2019s rental income covers {portfolioSpend < fp.annualWithdrawal ? fmt0(fp.annualWithdrawal - portfolioSpend) + ' of the ' + fmt0(fp.annualWithdrawal) + ' annual spend' : 'part of spending'}, so the portfolio target drops sharply. Spend & return assumptions live in the Me view; raise the spend for a two-person household if needed.</div>
+        {spendIsDerived && <div className="sub mt">Spend is estimated from your fixed costs ({fmt0(budgetFixedAnnual)}/yr) and leaves out discretionary spending — set your real household figure above.</div>}
+        {fp.aowEnabled && aowCoupleY > 0 &&
+          <div className="sub mt">From age {fp.aowAge}, two AOW streams add ~{fmt0(aowCoupleY)}/yr on top — enough to cover most of the {fmt0(portfolioSpend)} the portfolio carries. So the real job is <b>bridging {currentAge(fp.birthYear)} → {fp.aowAge}</b>; AOW is deliberately not counted as wealth here.</div>}
+        <div className="sub mt">Property equity is the rental engine, not a drawdown pot — it earns through rent, so it stays out of the FIRE number. Return & SWR assumptions live in the Me view.</div>
       </div>
 
       {chartRows.length > 1 &&
