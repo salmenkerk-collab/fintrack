@@ -64,6 +64,28 @@
   @keyframes drawStroke{from{stroke-dashoffset:92}to{stroke-dashoffset:0}}
   @keyframes riseUp{from{transform:translateY(40px)}to{transform:translateY(0)}}
   @keyframes rayPulse{0%,100%{opacity:1}50%{opacity:.5}}
+  /* v37 — motion polish */
+  @keyframes tabIn2{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  main{ animation: tabIn2 .4s cubic-bezier(.25,.8,.3,1) both; }
+  @keyframes growW{ from{ width:0 } }
+  .growbar{ animation: growW .9s cubic-bezier(.25,.8,.3,1) both .12s; }
+  html{ scroll-behavior:smooth; }
+  .tab{ transition: color .2s ease, border-bottom-color .28s ease; }
+  .btn{ transition: border-color .18s ease, background .18s ease, transform .12s ease; }
+  .btn:active{ transform: scale(.96); }
+  .btn-icon{ transition: opacity .15s ease, transform .12s ease; }
+  .btn-icon:active{ transform: scale(.9); }
+  /* milestone ladder */
+  .milestones{ display:grid; grid-template-columns:repeat(auto-fit,minmax(215px,1fr)); gap:3px 14px; margin-top:6px; }
+  .ms{ display:flex; align-items:baseline; gap:8px; padding:4px 9px; border-radius:7px; color:var(--dim); border:1px dashed transparent; }
+  .ms .ms-ico{ width:14px; text-align:center; flex-shrink:0; }
+  .ms .ms-lab{ flex:1; font-size:12.5px; }
+  .ms .ms-amt{ font-size:12px; }
+  .ms.hit{ color:var(--text); }
+  .ms.hit .ms-ico{ color:var(--green); }
+  .ms.nxt{ border-color:var(--yellow); color:var(--text); background:rgba(185,138,46,.07); }
+  .ms.nxt .ms-ico{ color:var(--yellow); }
+  .ms-togo{ font-size:11px; color:var(--yellow); white-space:nowrap; }
 
   /* ---------- header ---------- */
   .header{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:6px 0 14px; }
@@ -786,7 +808,7 @@ function NetWorthTab({ data, setData, lens = 'sven' }){
             <div className="donut-wrap">
               <ResponsiveContainer>
                 <PieChart>
-                  <Pie data={donutData} dataKey="value" nameKey="name"
+                  <Pie animationDuration={900} animationEasing="ease-out" data={donutData} dataKey="value" nameKey="name"
                        innerRadius={62} outerRadius={96} paddingAngle={2} stroke="none">
                     {donutData.map((d,i) => <Cell key={i} fill={d.fill}/>)}
                   </Pie>
@@ -1098,6 +1120,52 @@ function monthlyNeeded(startNW, fp){
   return Math.ceil(hi / 10) * 10;
 }
 
+/* FIRE milestones ladder: classic waypoints + Half/Coast/FI, deduped when crowded. */
+function Milestones({ liquid, target, coast }){
+  if (!target || target <= 0) return null;
+  const marks = [
+    { at:10000,  label:'First €10k' },
+    { at:25000,  label:'€25k' },
+    { at:50000,  label:'€50k' },
+    { at:100000, label:'First €100k' },
+    { at:250000, label:'Quarter million' },
+    { at:500000, label:'Half million' },
+  ].filter(m => m.at < target * 0.96);
+  marks.push({ at: target * 0.25, label:'25% of FI' });
+  marks.push({ at: target * 0.5,  label:'Half FI' });
+  if (coast && coast > 0 && coast < target * 0.96) marks.push({ at: coast, label:'Coast FI' });
+  marks.push({ at: target, label:'FI — spend covered' });
+  marks.sort((a,b) => a.at - b.at);
+  const kept = [];
+  marks.forEach(m => {
+    const prev = kept[kept.length - 1];
+    if (prev && (m.at - prev.at) < target * 0.05){
+      if (m.label.indexOf('FI') >= 0 || prev.label.indexOf('FI') < 0) kept[kept.length - 1] = m;
+    } else kept.push(m);
+  });
+  const next = kept.find(m => liquid < m.at);
+  const done = kept.filter(m => liquid >= m.at).length;
+  return (
+    <div className="mt">
+      <div className="spread"><h3 style={{margin:0}}>Milestones</h3><span className="small dim">{done}/{kept.length}</span></div>
+      <div className="milestones">
+        {kept.map((m, i) => {
+          const hit = liquid >= m.at;
+          const isNext = next && next.at === m.at;
+          return (
+            <div key={i} className={'ms' + (hit ? ' hit' : '') + (isNext ? ' nxt' : '')}>
+              <span className="ms-ico">{hit ? '✓' : (isNext ? '→' : '○')}</span>
+              <span className="ms-lab">{m.label}</span>
+              <span className="ms-amt num">{fmt0(m.at)}</span>
+              {isNext && <span className="ms-togo num">{fmt0(m.at - liquid)} to go</span>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PeopleFireView({ data, setData, lens }){
   const [showRE, setShowRE] = useState(false);
   const fp = data.fireParams;
@@ -1160,6 +1228,8 @@ function PeopleFireView({ data, setData, lens }){
   const sim = simulate(liquid, fiFp, fp.grossReturn, fp.inflation);   // sim.fireNumber === fiNumber
   const pctToFI = fiNumber > 0 ? Math.min(100, liquid / fiNumber * 100) : 100;
   const chartRows = sim.rows.filter(r => r.year <= sim.targetYear);
+  const yearsToT = Math.max(sim.targetYear - sim.startYear, 0);
+  const coastToday = sim.fireAtTarget / Math.pow(1 + fp.grossReturn/100, yearsToT);
   const incomeM = lens === 'ours' ? (((data.income||{}).sven||0) + ((data.income||{}).charlotte||0)) : (((data.income||{})[lens]) || 0);
   const investRate = incomeM > 0 ? Math.min(100, hhContribM / incomeM * 100) : null;
 
@@ -1195,7 +1265,7 @@ function PeopleFireView({ data, setData, lens }){
           return (
             <div key={id} style={{marginBottom:14}}>
               <div className="spread" style={{marginBottom:4}}><span style={{fontWeight:700}}>{pp[1]}</span><span className="num" style={{fontWeight:700}}>{fmt0(tot)}</span></div>
-              <div style={{display:'flex', height:26, borderRadius:6, overflow:'hidden', width:Math.max(2, tot / maxTotal * 100) + '%', background:'var(--surface2)'}}>
+              <div className="growbar" style={{display:'flex', height:26, borderRadius:6, overflow:'hidden', width:Math.max(2, tot / maxTotal * 100) + '%', background:'var(--surface2)'}}>
                 {TYPE.map(t => bd[id][t.key] > 0
                   ? <div key={t.key} title={t.label + ' ' + fmt0(bd[id][t.key])} style={{width:(bd[id][t.key] / tot * 100) + '%', background:t.color}}/>
                   : null)}
@@ -1241,13 +1311,14 @@ function PeopleFireView({ data, setData, lens }){
           <div className="num muted">{fmt0(liquid)} / {fmt0(fiNumber)}</div>
         </div>
         <div style={{position:'relative', height:14, background:'var(--bg)', borderRadius:8, marginTop:14}}>
-          <div style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
+          <div className="growbar" style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
             background:'linear-gradient(90deg,#4A211C,#5E6B3B)', borderRadius:8, transition:'width .4s'}}/>
         </div>
         <div className="spread" style={{marginTop:6}}>
           <span className="small dim">€0</span>
           <span className="small dim">{fmt0(fiNumber)}</span>
         </div>
+        <Milestones liquid={liquid} target={fiNumber} coast={coastToday}/>
         {spendIsDerived && <div className="sub mt">Spend is estimated from your fixed costs ({fmt0(budgetFixedAnnual)}/yr) and leaves out discretionary spending — set your real household figure above.</div>}
         <div className="sub mt">Charlotte’s flat counts as <b>equity</b>, not lifelong income — if she sells it to help buy a home, the rent stops but the equity rolls into property. So it sits on the balance sheet (net worth), not inside this number.</div>
       </div>
@@ -1311,7 +1382,7 @@ function PeopleFireView({ data, setData, lens }){
                 <YAxis tickFormatter={v => '\u20ac' + Math.round(v/1000) + 'k'} tick={{fontSize:11, fill:'var(--muted)'}} width={48}/>
                 <Tooltip formatter={v => fmt0(v)} labelFormatter={a => 'Age ' + a}/>
                 <ReferenceLine y={fiNumber} stroke="var(--red)" strokeDasharray="5 4" label={{value:'FI', fontSize:10, fill:'var(--red)'}}/>
-                <Area type="monotone" dataKey="nominal" stroke="var(--green)" strokeWidth={2} fill="url(#hhg)"/>
+                <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="nominal" stroke="var(--green)" strokeWidth={2} fill="url(#hhg)"/>
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -1377,7 +1448,7 @@ function FireTab({ data, setData, lens = 'sven' }){
           <div className="num muted">{fmt0(liquid)} / {fmt0(baseFI.fireNumber)}</div>
         </div>
         <div style={{position:'relative', height:14, background:'var(--bg)', borderRadius:8, marginTop:14}}>
-          <div style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
+          <div className="growbar" style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
             background:'linear-gradient(90deg,#4A211C,#5E6B3B)', borderRadius:8, transition:'width .4s'}}/>
           <div style={{position:'absolute', left:coastPct+'%', top:-5, height:24, width:2, background:'#B98A2E'}} title="Coast FIRE point"></div>
         </div>
@@ -1386,6 +1457,7 @@ function FireTab({ data, setData, lens = 'sven' }){
           <span className="small" style={{color:'#B98A2E'}}>Coast FI · {fmt0(coastNumberToday)}</span>
           <span className="small dim">{fmt0(baseFI.fireNumber)}</span>
         </div>
+        <Milestones liquid={liquid} target={baseFI.fireNumber} coast={coastNumberToday}/>
         <div className="sub mt">This is your pure FI target — investments carrying your spend forever. Your AOW + pensions mean the number you’d actually need to <i>stop early</i> is lower; that RE view lives in the Ours tab and the assumptions below.</div>
         <div className="grid2 mt">
           <div className="card" style={{background:'var(--bg)', borderColor: isCoast ? 'var(--green)' : 'var(--surface2)'}}>
@@ -1499,8 +1571,8 @@ function FireTab({ data, setData, lens = 'sven' }){
               <XAxis dataKey="year" tick={{fill:'#5C574C', fontSize:12}}/>
               <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
               <Tooltip formatter={(v,n) => [fmt0(v), n]}/>
-              <Area type="monotone" dataKey="nominal" name="Nominal" stroke="#4A211C" fill="#4A211C" fillOpacity={0.25} strokeWidth={2}/>
-              <Area type="monotone" dataKey="real" name="Real (today's €)" stroke="#5E6B3B" fill="#5E6B3B" fillOpacity={0.18} strokeWidth={2}/>
+              <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="nominal" name="Nominal" stroke="#4A211C" fill="#4A211C" fillOpacity={0.25} strokeWidth={2}/>
+              <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="real" name="Real (today's €)" stroke="#5E6B3B" fill="#5E6B3B" fillOpacity={0.18} strokeWidth={2}/>
               {base.coastYear && <ReferenceLine x={base.coastYear} stroke="#B98A2E" strokeDasharray="4 4"
                  label={{value:'Coast FIRE', fill:'#B98A2E', fontSize:11, position:'insideTopLeft'}}/>}
               {base.fireYear && base.fireYear <= base.targetYear &&
@@ -1521,8 +1593,8 @@ function FireTab({ data, setData, lens = 'sven' }){
               <XAxis dataKey="year" tick={{fill:'#5C574C', fontSize:12}}/>
               <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
               <Tooltip formatter={(v,n) => [fmt0(v), n]}/>
-              <Bar dataKey="contrib" name="Contributions" stackId="a" fill="#4A211C"/>
-              <Bar dataKey="growth" name="Market growth" stackId="a" fill="#5E6B3B"/>
+              <Bar animationDuration={850} animationEasing="ease-out" dataKey="contrib" name="Contributions" stackId="a" fill="#4A211C"/>
+              <Bar animationDuration={850} animationEasing="ease-out" dataKey="growth" name="Market growth" stackId="a" fill="#5E6B3B"/>
               <Legend wrapperStyle={{fontSize:12}}/>
             </BarChart>
           </ResponsiveContainer>
@@ -1987,7 +2059,7 @@ function BudgetTab({ data, setData, lens = 'sven' }){
                       <XAxis dataKey="name" tick={{fill:'#5C574C', fontSize:11}}/>
                       <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + v} width={50}/>
                       <Tooltip formatter={v => fmt(v)}/>
-                      <Bar dataKey="value" name="This month" radius={[5,5,0,0]}>
+                      <Bar animationDuration={850} animationEasing="ease-out" dataKey="value" name="This month" radius={[5,5,0,0]}>
                         {catTotals.map((c,i) => <Cell key={i} fill={c.fill}/>)}
                       </Bar>
                     </BarChart>
@@ -2360,6 +2432,53 @@ function RentalPropertyCard({ a, data, setData }){
   );
 }
 
+/* Ours: every property merged into one household view — shared scale, equity vs mortgage. */
+function HouseholdPropertyCard({ data }){
+  const fx = (data.fx && data.fx.GBP) || 1.17;
+  const liabs = data.liabilities || [];
+  const rows = (data.assets || []).filter(a => a.category === 'property').map(a => {
+    const own = a.owner || 'sven';
+    const mort = liabs.find(l => l.linkedAssetId === a.id)
+      || (own === 'sven' ? liabs.find(l => !l.linkedAssetId && (l.owner || 'sven') === 'sven') : null);
+    const debt = mort ? (mort.value || 0) : 0;
+    const natDebt = mort ? (mort.currency === 'GBP' ? (mort.fxAmount || 0) : (mort.value || 0)) : 0;
+    const nat = a.currency === 'GBP' ? (a.fxAmount || 0) : (a.value || 0);
+    return { id:a.id, name:a.name, owner:own, gbp:a.currency === 'GBP',
+             value:a.value || 0, debt, equity:Math.max(0, (a.value || 0) - debt),
+             natEquity:Math.max(0, nat - natDebt) };
+  });
+  if (rows.length < 2) return null;
+  const totVal = rows.reduce((s,r) => s + r.value, 0);
+  const totDebt = rows.reduce((s,r) => s + r.debt, 0);
+  const totEq = rows.reduce((s,r) => s + r.equity, 0);
+  const blendedLtv = totVal > 0 ? totDebt / totVal * 100 : 0;
+  const maxVal = Math.max(1, ...rows.map(r => r.value));
+  return (
+    <div className="card">
+      <h2>Household property · combined</h2>
+      <div className="sub mb">Both homes on one scale — the green part is yours, the pale part still belongs to the bank.</div>
+      <div className="metric green"><CountUp value={totEq} format={fmt0}/></div>
+      <div className="sub mb">combined equity · {fmt0(totVal)} value − {fmt0(totDebt)} mortgages · blended LTV {pct1(blendedLtv)}</div>
+      {rows.map(r => (
+        <div key={r.id} style={{marginBottom:12}}>
+          <div className="spread" style={{marginBottom:4}}>
+            <span><b>{r.name}</b> <span className="small dim">{OWNERS[r.owner] || r.owner}</span></span>
+            <span className="num small">{r.gbp ? gbpfmt(r.natEquity) + ' · ' : ''}{fmt0(r.equity)} equity</span>
+          </div>
+          <div className="growbar" style={{display:'flex', height:22, borderRadius:6, overflow:'hidden', width:Math.max(4, r.value / maxVal * 100) + '%', background:'var(--surface2)'}}>
+            {r.equity > 0 && <div title={'Equity ' + fmt0(r.equity)} style={{width:(r.equity / r.value * 100) + '%', background:'var(--green)'}}/>}
+            {r.debt > 0 && <div title={'Mortgage ' + fmt0(r.debt)} style={{width:(r.debt / r.value * 100) + '%', background:'var(--red)', opacity:.35}}/>}
+          </div>
+        </div>
+      ))}
+      <div className="row" style={{gap:14, flexWrap:'wrap'}}>
+        <span className="small" style={{display:'inline-flex', alignItems:'center', gap:5}}><span style={{width:10, height:10, borderRadius:2, background:'var(--green)', display:'inline-block'}}/>Equity</span>
+        <span className="small" style={{display:'inline-flex', alignItems:'center', gap:5}}><span style={{width:10, height:10, borderRadius:2, background:'var(--red)', opacity:.35, display:'inline-block'}}/>Mortgage</span>
+      </div>
+    </div>
+  );
+}
+
 function PropertyTab({ data, setData, lens = 'sven' }){
   const p = data.property;
   const showSven = lensMatch('sven', lens);
@@ -2436,6 +2555,7 @@ function PropertyTab({ data, setData, lens = 'sven' }){
 
   return (
     <div className="stack">
+      {lens === 'ours' && <HouseholdPropertyCard data={data}/>}
       {otherProps.map(a => <RentalPropertyCard key={a.id} a={a} data={data} setData={setData}/>)}
       <div className="grid2">
         <div className="card">
@@ -2484,9 +2604,9 @@ function PropertyTab({ data, setData, lens = 'sven' }){
               <XAxis dataKey="year" tick={{fill:'#5C574C', fontSize:12}}/>
               <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={58} domain={[0, 'auto']}/>
               <Tooltip formatter={(v,n) => [fmt0(v), n]}/>
-              <Area type="monotone" dataKey="value" name="Property value" stroke="#988C6C" fill="#988C6C" fillOpacity={0.15} strokeWidth={2}/>
-              <Area type="monotone" dataKey="mortgage" name="Mortgage balance" stroke="#A2492B" fill="#A2492B" fillOpacity={0.18} strokeWidth={2}/>
-              <Area type="monotone" dataKey="equity" name="Equity" stroke="#5E6B3B" fillOpacity={0} strokeWidth={2} strokeDasharray="5 3"/>
+              <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="value" name="Property value" stroke="#988C6C" fill="#988C6C" fillOpacity={0.15} strokeWidth={2}/>
+              <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="mortgage" name="Mortgage balance" stroke="#A2492B" fill="#A2492B" fillOpacity={0.18} strokeWidth={2}/>
+              <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="equity" name="Equity" stroke="#5E6B3B" fillOpacity={0} strokeWidth={2} strokeDasharray="5 3"/>
               <Legend wrapperStyle={{fontSize:12}}/>
             </AreaChart>
           </ResponsiveContainer>
@@ -2691,8 +2811,8 @@ function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap
                   <XAxis dataKey="month" tick={{fill:'#5C574C', fontSize:11}}/>
                   <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
                   <Tooltip formatter={(v,n) => [fmt0(v), n]}/>
-                  <Area type="monotone" dataKey="liquid" name="Actual liquid NW" stroke="#5E6B3B" fill="#5E6B3B" fillOpacity={0.22} strokeWidth={2}/>
-                  <Area type="monotone" dataKey="expected" name="Expected (plan)" stroke="#5C574C" fillOpacity={0} strokeWidth={2} strokeDasharray="6 4"/>
+                  <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="liquid" name="Actual liquid NW" stroke="#5E6B3B" fill="#5E6B3B" fillOpacity={0.22} strokeWidth={2}/>
+                  <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="expected" name="Expected (plan)" stroke="#5C574C" fillOpacity={0} strokeWidth={2} strokeDasharray="6 4"/>
                   <Legend wrapperStyle={{fontSize:12}}/>
                 </AreaChart>
               </ResponsiveContainer>
@@ -2709,9 +2829,9 @@ function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap
                   <XAxis dataKey="month" tick={{fill:'#5C574C', fontSize:11}}/>
                   <YAxis tick={{fill:'#5C574C', fontSize:12}} tickFormatter={v => '€' + Math.round(v/1000) + 'k'} width={55}/>
                   <Tooltip formatter={(v,n) => [fmt0(v), n]}/>
-                  <Area type="monotone" dataKey="invested" name="Invested (stocks + crypto)" stackId="1" stroke="#5E6B3B" fill="#5E6B3B" fillOpacity={0.45}/>
-                  <Area type="monotone" dataKey="savings" name="Cash savings" stackId="1" stroke="#988C6C" fill="#988C6C" fillOpacity={0.45}/>
-                  <Area type="monotone" dataKey="prop" name="Property equity" stackId="1" stroke="#4A211C" fill="#4A211C" fillOpacity={0.4}/>
+                  <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="invested" name="Invested (stocks + crypto)" stackId="1" stroke="#5E6B3B" fill="#5E6B3B" fillOpacity={0.45}/>
+                  <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="savings" name="Cash savings" stackId="1" stroke="#988C6C" fill="#988C6C" fillOpacity={0.45}/>
+                  <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="prop" name="Property equity" stackId="1" stroke="#4A211C" fill="#4A211C" fillOpacity={0.4}/>
                   <Legend wrapperStyle={{fontSize:12}}/>
                 </AreaChart>
               </ResponsiveContainer>
@@ -2730,7 +2850,7 @@ function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap
                   <ReferenceLine y={refExpected} stroke="#B98A2E" strokeDasharray="4 4"
                     label={{value:'expected', fill:'#B98A2E', fontSize:11, position:'insideTopRight'}}/>
                   <ReferenceLine y={0} stroke="#8A8475"/>
-                  <Bar dataKey="delta" name="Δ liquid NW" radius={[4,4,0,0]}>
+                  <Bar animationDuration={850} animationEasing="ease-out" dataKey="delta" name="Δ liquid NW" radius={[4,4,0,0]}>
                     {deltas.map((d,i) => <Cell key={i} fill={d.delta >= 0 ? '#5E6B3B' : '#A2492B'}/>)}
                   </Bar>
                 </BarChart>
@@ -4195,7 +4315,7 @@ function GoalsTab({ data, setData, lens = 'sven' }){
             </div>
 
             <div style={{position:'relative', height:12, background:'var(--bg)', borderRadius:8, marginTop:12}}>
-              <div style={{position:'absolute', left:0, top:0, height:'100%', width:c.pct + '%',
+              <div className="growbar" style={{position:'absolute', left:0, top:0, height:'100%', width:c.pct + '%',
                 background: c.reached ? 'var(--green)' : 'linear-gradient(90deg,#4A211C,#5E6B3B)', borderRadius:8, transition:'width .4s'}}></div>
             </div>
             <div className="spread" style={{marginTop:6}}>
