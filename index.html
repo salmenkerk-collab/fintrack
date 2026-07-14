@@ -2237,6 +2237,16 @@ function PortfolioGrowthCard({ data, setData }){
     }
   });
   const points = Object.keys(byDate).sort().map(d => ({ ...byDate[d], sig: sigByDate[d] ? Math.round(sigByDate[d].amt) : 0 }));
+  // anchor the endpoint to the live DEGIRO positions in the asset list (ex cash),
+  // so "today" reads true while the historic curve keeps last-trade prices.
+  const degiroNow = (data.assets || []).filter(a => a.category === 'stocks' && a.institutionId === 'degiro' && !/^Cash/i.test(a.name))
+    .reduce((s,a) => s + a.value, 0);
+  let anchored = false;
+  if (points.length && degiroNow > 0){
+    const lp = points[points.length - 1];
+    const today = ISO(TODAY);
+    if (today > lp.date){ points.push({ date: today, value: Math.round(degiroNow), invested: lp.invested, sig: 0 }); anchored = true; }
+  }
   const last = points.length ? points[points.length - 1] : null;
   const growth = last ? last.value - last.invested : 0;
   const growthPct = last && last.invested > 0 ? (last.value / last.invested - 1) * 100 : 0;
@@ -2263,7 +2273,8 @@ function PortfolioGrowthCard({ data, setData }){
         : <React.Fragment>
         <div className="grid3 mt">
           <div><h3>Money in</h3><div className="metric">{fmt0(last.invested)}</div></div>
-          <div><h3>Value @ last trade</h3><div className="metric">{fmt0(last.value)}</div></div>
+          <div><h3>{anchored ? 'Value today' : 'Value @ last trade'}</h3><div className="metric">{fmt0(last.value)}</div>
+            {anchored && <div className="sub">from your asset list</div>}</div>
           <div><h3>Market growth</h3><div className={'metric ' + (growth >= 0 ? 'green' : 'red')}>{(growth >= 0 ? '+' : '') + fmt0(growth)} · {pct1(growthPct)}</div></div>
         </div>
         <div style={{width:'100%', height:260}} className="mt">
@@ -2282,7 +2293,11 @@ function PortfolioGrowthCard({ data, setData }){
             </AreaChart>
           </ResponsiveContainer>
         </div>
-        <div className="sub mt">Solid line: what the portfolio is worth. Dashed line: money you put in — deposits move it up in steps, so everything between the lines is the market. Gold dots mark buy-days of at least <NumInput value={thr} step={50} width={80} onChange={setThr}/>.</div>
+        <div className="sub mt">Solid line: what the portfolio is worth. Dashed line: money you put in — deposits move it up in steps, so everything between the lines is the market.</div>
+        <div className="row mt" style={{gap:8, alignItems:'center', flexWrap:'wrap'}}>
+          <span className="small dim">Gold dots mark buy-days of at least</span>
+          <NumInput value={thr} step={50} width={80} onChange={setThr}/>
+        </div>
         {sigList.length > 0 && <div className="mt">
           <h3>Significant buys</h3>
           <div className="milestones">
@@ -2295,7 +2310,7 @@ function PortfolioGrowthCard({ data, setData }){
             ))}
           </div>
         </div>}
-        <div className="sub mt">Prices update only when something trades, so the curve is exact on trade days and held flat in between — fine for monthly investing, but it won’t show swings between trades.</div>
+        <div className="sub mt">Between trades the curve holds last-known prices, so positions you haven’t traded recently sit at older values — the endpoint is anchored to your live asset list to correct for this. DEGIRO’s Totaal W/V will still read slightly higher: it ignores transaction and FX costs (folded into “money in” here) and account cash isn’t a security, so it isn’t tracked.</div>
       </React.Fragment>}
     </div>
   );
