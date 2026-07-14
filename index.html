@@ -449,6 +449,7 @@ function seedData(){
     },
     income: { sven:3671, charlotte:0, jointContribution:1000 },
     household: { jointContribEach:1000, sharedSplit:50 },
+    portfolioTx: [],
     fx: { GBP: 1.17 },
     goals: [
       { id:'goal-car-2028', name:'New car', icon:'🚗', target:25000, targetDate:'2028-06', saved:0, monthly:0 },
@@ -526,6 +527,7 @@ function migrate(d){
     const fpd = d.fireParams;
     if (fpd.aowEnabled === undefined) fpd.aowEnabled = false;
     if (fpd.charlotteContribution === undefined) fpd.charlotteContribution = 0;
+    if (!Array.isArray(d.portfolioTx)) d.portfolioTx = [];
     if (fpd.aowAge === undefined) fpd.aowAge = 70;
     if (fpd.aowAnnualGross === undefined) fpd.aowAnnualGross = 13673;
     if (fpd.aowBuildPct === undefined) fpd.aowBuildPct = 100;
@@ -2160,6 +2162,145 @@ function HoldingIcon({ asset }){
 }
 
 /* ============================ TAB 4 — Portfolio ============================ */
+/* DEGIRO Transactions.csv → growth reconstruction. Prices are last-known-at-trade, so the
+   curve is exact on trade days and held flat in between — honest for monthly investing. */
+function parseDegiroCsv(text){
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (!lines.length) return { error:'Empty file.' };
+  const parseLine = l => {
+    const out = []; let cur = '', q = false;
+    for (let i = 0; i < l.length; i++){
+      const ch = l[i];
+      if (q){ if (ch === '"'){ if (l[i+1] === '"'){ cur += '"'; i++; } else q = false; } else cur += ch; }
+      else if (ch === '"') q = true;
+      else if (ch === ','){ out.push(cur); cur = ''; }
+      else cur += ch;
+    }
+    out.push(cur); return out;
+  };
+  const hdr = parseLine(lines[0]);
+  const iD = hdr.indexOf('Datum'), iT = hdr.indexOf('Tijd'), iP = hdr.indexOf('Product'),
+        iI = hdr.indexOf('ISIN'), iQ = hdr.indexOf('Aantal'), iV = hdr.indexOf('Waarde EUR'),
+        iTot = hdr.indexOf('Totaal EUR');
+  if (iD < 0 || iQ < 0 || iV < 0) return { error:'Header not recognised — expecting a DEGIRO Transactions.csv (Dutch export).' };
+  const num = x => parseFloat(String(x || '0').replace(/\./g, '').replace(',', '.')) || 0;
+  const tx = [];
+  for (let i = 1; i < lines.length; i++){
+    const c = parseLine(lines[i]);
+    if (!c[iD] || !c[iI]) continue;
+    const dp = c[iD].split('-');
+    if (dp.length !== 3) continue;
+    tx.push({ date: dp[2] + '-' + dp[1] + '-' + dp[0], time: c[iT] || '',
+              name: c[iP] || '', isin: c[iI], qty: num(c[iQ]),
+              valueEur: Math.abs(num(c[iV])), totalEur: num(c[iTot >= 0 ? iTot : iV]) });
+  }
+  return { tx };
+}
+
+function PortfolioGrowthCard({ data, setData }){
+  const fileRef = useRef(null);
+  const tx = data.portfolioTx || [];
+  const fp = data.fireParams || {};
+  const thr = fp.sigBuyThreshold != null ? fp.sigBuyThreshold : 750;
+  const setThr = v => setData({ ...data, fireParams: { ...fp, sigBuyThreshold: v } });
+
+  const onImport = e => {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const res = parseDegiroCsv(String(ev.target.result || ''));
+      if (res.error){ alert(res.error); return; }
+      const key = t => [t.date, t.time, t.isin, t.qty, t.totalEur].join('|');
+      const seen = {}; tx.forEach(t => { seen[key(t)] = true; });
+      const fresh = res.tx.filter(t => !seen[key(t)]);
+      setData({ ...data, portfolioTx: tx.concat(fresh) });
+      alert(fresh.length + ' new transactions imported' + (res.tx.length > fresh.length ? ' (' + (res.tx.length - fresh.length) + ' already known)' : '') + '.');
+    };
+    reader.readAsText(f);
+    e.target.value = '';
+  };
+  const clearAll = () => { if (confirm('Remove all imported portfolio transactions?')) setData({ ...data, portfolioTx: [] }); };
+
+  const sorted = tx.slice().sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const qty = {}, px = {};
+  let invested = 0;
+  const byDate = {}, sigByDate = {};
+  sorted.forEach(t => {
+    if (t.qty){ px[t.isin] = t.valueEur / Math.abs(t.qty); qty[t.isin] = (qty[t.isin] || 0) + t.qty; }
+    invested += -t.totalEur;
+    let value = 0; for (const i in qty){ value += qty[i] * (px[i] || 0); }
+    byDate[t.date] = { date: t.date, value: Math.round(value), invested: Math.round(invested) };
+    if (t.qty > 0 && t.valueEur >= thr){
+      sigByDate[t.date] = sigByDate[t.date] || { amt:0, names:[] };
+      sigByDate[t.date].amt += t.valueEur;
+      if (sigByDate[t.date].names.indexOf(t.name) < 0) sigByDate[t.date].names.push(t.name);
+    }
+  });
+  const points = Object.keys(byDate).sort().map(d => ({ ...byDate[d], sig: sigByDate[d] ? Math.round(sigByDate[d].amt) : 0 }));
+  const last = points.length ? points[points.length - 1] : null;
+  const growth = last ? last.value - last.invested : 0;
+  const growthPct = last && last.invested > 0 ? (last.value / last.invested - 1) * 100 : 0;
+  const sigList = Object.keys(sigByDate).sort().reverse().map(d => ({ date:d, amt:sigByDate[d].amt, names:sigByDate[d].names }));
+
+  const SigDot = props => {
+    const pl = props.payload || {};
+    if (!pl.sig) return <circle key={'sd' + props.index} cx={props.cx} cy={props.cy} r={0} fill="none"/>;
+    return <circle key={'sd' + props.index} cx={props.cx} cy={props.cy} r={5} fill="var(--yellow)" stroke="var(--bg)" strokeWidth={1.5}/>;
+  };
+
+  return (
+    <div className="card">
+      <div className="spread" style={{flexWrap:'wrap', gap:8}}>
+        <h2 style={{marginBottom:0}}>Portfolio growth · DEGIRO</h2>
+        <div className="row" style={{gap:8}}>
+          <button className="btn" onClick={() => fileRef.current && fileRef.current.click()}>📥 Import Transactions.csv</button>
+          {tx.length > 0 && <button className="btn-icon" title="Clear imported transactions" onClick={clearAll}>🗑 clear</button>}
+        </div>
+      </div>
+      <input ref={fileRef} type="file" accept=".csv,text/csv" style={{display:'none'}} onChange={onImport}/>
+      {!last
+        ? <div className="sub mt">Import your DEGIRO <b>Transactions.csv</b> (app → Inbox → Transacties → Export) to see total value against money in — market growth, not deposits — with significant buys marked in gold.</div>
+        : <React.Fragment>
+        <div className="grid3 mt">
+          <div><h3>Money in</h3><div className="metric">{fmt0(last.invested)}</div></div>
+          <div><h3>Value @ last trade</h3><div className="metric">{fmt0(last.value)}</div></div>
+          <div><h3>Market growth</h3><div className={'metric ' + (growth >= 0 ? 'green' : 'red')}>{(growth >= 0 ? '+' : '') + fmt0(growth)} · {pct1(growthPct)}</div></div>
+        </div>
+        <div style={{width:'100%', height:260}} className="mt">
+          <ResponsiveContainer>
+            <AreaChart data={points} margin={{top:8, right:12, left:4, bottom:0}}>
+              <defs><linearGradient id="pfg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--green)" stopOpacity={0.45}/>
+                <stop offset="100%" stopColor="var(--green)" stopOpacity={0.03}/>
+              </linearGradient></defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--rule)"/>
+              <XAxis dataKey="date" tick={{fontSize:10, fill:'var(--muted)'}} minTickGap={34} tickFormatter={d => d.slice(2,7)}/>
+              <YAxis tickFormatter={v => '€' + Math.round(v/1000) + 'k'} tick={{fontSize:11, fill:'var(--muted)'}} width={46}/>
+              <Tooltip formatter={v => fmt0(v)} labelFormatter={d => d}/>
+              <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="value" name="Total value" stroke="var(--green)" strokeWidth={2} fill="url(#pfg)" dot={SigDot}/>
+              <Area animationDuration={850} animationEasing="ease-out" type="stepAfter" dataKey="invested" name="Money in" stroke="#4A211C" strokeWidth={1.6} strokeDasharray="5 3" fillOpacity={0}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="sub mt">Solid line: what the portfolio is worth. Dashed line: money you put in — deposits move it up in steps, so everything between the lines is the market. Gold dots mark buy-days of at least <NumInput value={thr} step={50} width={80} onChange={setThr}/>.</div>
+        {sigList.length > 0 && <div className="mt">
+          <h3>Significant buys</h3>
+          <div className="milestones">
+            {sigList.slice(0, 8).map(sb => (
+              <div key={sb.date} className="ms hit">
+                <span className="ms-ico" style={{color:'var(--yellow)'}}>●</span>
+                <span className="ms-lab">{sb.date} · {sb.names.map(n => n.split(' ')[0]).join(', ')}</span>
+                <span className="ms-amt num">{fmt0(sb.amt)}</span>
+              </div>
+            ))}
+          </div>
+        </div>}
+        <div className="sub mt">Prices update only when something trades, so the curve is exact on trade days and held flat in between — fine for monthly investing, but it won’t show swings between trades.</div>
+      </React.Fragment>}
+    </div>
+  );
+}
+
 function PortfolioTab({ data, setData, lens = 'sven' }){
   const assets = data.assets;
   const vAssets = assets.filter(a => lensMatch(a.owner, lens));
@@ -2207,6 +2348,7 @@ function PortfolioTab({ data, setData, lens = 'sven' }){
 
   return (
     <div className="stack">
+      {lensMatch('sven', lens) && <PortfolioGrowthCard data={data} setData={setData}/>}
       <div className="grid3">
         <BrokerCard title="DEGIRO" total={sum(degiro)} count={degiro.length} unit="positions"/>
         <BrokerCard title="Trade Republic" total={sum(tr)} count={tr.length} unit="positions"/>
