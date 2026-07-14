@@ -2316,6 +2316,150 @@ function PortfolioGrowthCard({ data, setData }){
   );
 }
 
+/* Money time machine: counterfactuals priced with the user's OWN trade history —
+   the most-bought ISIN provides a monthly price series (no external price API). */
+function TimeMachineCard({ data }){
+  const tx = (data.portfolioTx || []).slice().sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
+  const fp = data.fireParams || {};
+
+  const buysByIsin = {};
+  tx.forEach(t => {
+    if (t.qty > 0){
+      const b = buysByIsin[t.isin] = buysByIsin[t.isin] || { n:0, name:t.name };
+      b.n++;
+    }
+  });
+  let mainIsin = null, most = 0;
+  for (const i in buysByIsin){ if (buysByIsin[i].n > most){ most = buysByIsin[i].n; mainIsin = i; } }
+  const mainName = mainIsin ? (buysByIsin[mainIsin].name || '').split(' ').slice(0,2).join(' ') : '';
+
+  const priceByMonth = {};
+  tx.filter(t => t.isin === mainIsin && t.qty).forEach(t => { priceByMonth[t.date.slice(0,7)] = t.valueEur / Math.abs(t.qty); });
+  const tradedMonths = Object.keys(priceByMonth).sort();
+
+  const [amt, setAmt] = useState(100);
+  const [since, setSince] = useState('');
+  const [fw, setFw] = useState(150);
+
+  if (tradedMonths.length < 3){
+    return (
+      <div className="card">
+        <h2>Time machine · regret &amp; glory</h2>
+        <div className="sub mt">Import your DEGIRO Transactions.csv in the growth card above first — the time machine prices its what-ifs with your own trade history.</div>
+      </div>
+    );
+  }
+
+  const firstM = tradedMonths[0], lastM = tradedMonths[tradedMonths.length - 1];
+  const startM = since || firstM;
+  const months = [];
+  let cur = startM;
+  while (cur <= lastM){
+    months.push(cur);
+    let y = parseInt(cur.slice(0,4), 10), m = parseInt(cur.slice(5,7), 10) + 1;
+    if (m > 12){ m = 1; y++; }
+    cur = y + '-' + (m < 10 ? '0' + m : '' + m);
+  }
+  let units = 0, spent = 0, lastPx = priceByMonth[firstM];
+  months.forEach(mk => {
+    if (priceByMonth[mk]) lastPx = priceByMonth[mk];
+    units += amt / lastPx;
+    spent += amt;
+  });
+  const valueNow = units * lastPx;
+  const delta = valueNow - spent;
+
+  const pos = {};
+  tx.forEach(t => {
+    const p = pos[t.isin] = pos[t.isin] || { name:t.name, qty:0, buyEur:0, buyQty:0, lastPx:0, obs:0 };
+    if (t.qty){
+      p.lastPx = t.valueEur / Math.abs(t.qty);
+      p.obs++;
+      p.qty += t.qty;
+      if (t.qty > 0){ p.buyEur += t.valueEur; p.buyQty += t.qty; }
+    }
+  });
+  const shortName = n => { const w = (n || '').split(' '); return (w[0] && w[0].length < 4 ? w.slice(0,3) : w.slice(0,2)).join(' '); };
+  const ranked = [];
+  for (const i in pos){
+    const p = pos[i];
+    /* obs >= 2: a single-trade position has no price after purchase, so its "return" is always 0 — meaningless */
+    if (p.qty > 0.0001 && p.buyQty > 0 && p.obs >= 2){
+      const avg = p.buyEur / p.buyQty;
+      ranked.push({ name:shortName(p.name), ret:(p.lastPx / avg - 1) * 100, gain:(p.lastPx - avg) * p.qty });
+    }
+  }
+  ranked.sort((a,b) => b.ret - a.ret);
+  const fame = ranked.slice(0, 3);
+  const pain = ranked.slice(-3).reverse().filter(r => fame.indexOf(r) < 0);
+
+  const targetAge = fp.targetAge || 55;
+  const age = currentAge(fp.birthYear);
+  const yrs = Math.max(1, targetAge - age);
+  const rm = Math.pow(1 + (fp.grossReturn || 7) / 100, 1/12) - 1;
+  const nM = yrs * 12;
+  const fv = fw * ((Math.pow(1 + rm, nM) - 1) / rm);
+  const coffeeM = 3.5 * 30.4;
+  const fvCoffee = coffeeM * ((Math.pow(1 + rm, nM) - 1) / rm);
+
+  return (
+    <div className="card">
+      <h2>Time machine · regret &amp; glory</h2>
+
+      <h3 className="mt">The regret-o-meter</h3>
+      <div className="row" style={{gap:10, alignItems:'center', flexWrap:'wrap', margin:'6px 0'}}>
+        <span className="small dim">If I had invested</span>
+        <NumInput value={amt} step={25} min={5} width={80} onChange={setAmt} suffix="/mo"/>
+        <span className="small dim">since</span>
+        <select value={startM} onChange={e => setSince(e.target.value)} style={{width:110}}>
+          {tradedMonths.map(mk => <option key={mk} value={mk}>{mk}</option>)}
+        </select>
+        <span className="small dim">in {mainName}…</span>
+      </div>
+      <div className="row" style={{gap:18, flexWrap:'wrap', alignItems:'baseline'}}>
+        <span className="num">{fmt0(spent)} skipped</span>
+        <span className="num" style={{color:'var(--green)', fontWeight:700}}>→ {fmt0(valueNow)} today</span>
+        <span className="num" style={{color: delta >= 0 ? 'var(--red)' : 'var(--green)'}}>
+          {delta >= 0 ? 'regret: ' + fmt0(delta) : 'relief: ' + fmt0(-delta)}
+        </span>
+      </div>
+      <div className="row" style={{gap:8, marginTop:8, flexWrap:'wrap'}}>
+        <button className="btn" onClick={() => setAmt(75)}>☕ Coffee habit · €75/mo</button>
+        <button className="btn" onClick={() => setAmt(150)}>🥡 Takeaway · €150/mo</button>
+        <button className="btn" onClick={() => setAmt(300)}>🛍 Lifestyle · €300/mo</button>
+      </div>
+
+      <h3 className="mt">Hall of fame &amp; pain</h3>
+      <div className="grid2">
+        <div>
+          {fame.map(r => (
+            <div key={r.name} className="kv"><span className="k">🏆 {r.name}</span>
+              <span className="v green">{(r.ret >= 0 ? '+' : '') + r.ret.toFixed(0)}% · {fmt0(r.gain)}</span></div>
+          ))}
+        </div>
+        <div>
+          {pain.map(r => (
+            <div key={r.name} className="kv"><span className="k">🧊 {r.name}</span>
+              <span className="v" style={{color: r.ret < 0 ? 'var(--red)' : 'var(--dim)'}}>{(r.ret >= 0 ? '+' : '') + r.ret.toFixed(0)}% · {fmt0(r.gain)}</span></div>
+          ))}
+        </div>
+      </div>
+      <div className="sub">Returns vs your average buy price, at last-trade prices — only positions the market has repriced since purchase (traded more than once) qualify.</div>
+
+      <h3 className="mt">Forward time machine</h3>
+      <div className="row" style={{gap:10, alignItems:'center', flexWrap:'wrap', margin:'6px 0'}}>
+        <span className="small dim">Investing an extra</span>
+        <NumInput value={fw} step={25} min={5} width={80} onChange={setFw} suffix="/mo"/>
+        <span className="small dim">from today until {targetAge} becomes</span>
+        <span className="num" style={{color:'var(--green)', fontWeight:700}}>{fmt0(fv)}</span>
+      </div>
+      <div className="sub">At your {fp.grossReturn || 7}% assumption over {yrs} years. For scale: a €3,50-a-day coffee habit is {fmt0(fvCoffee)} by then.</div>
+
+      <div className="sub mt" style={{borderTop:'1px solid var(--rule)', paddingTop:8}}>Counterfactuals are priced with your own {mainName} trades (monthly resolution, from {firstM}). Zero-guilt clause: the coffee was probably worth it — this is fuel for the next euro, not a court for the last one.</div>
+    </div>
+  );
+}
+
 function PortfolioTab({ data, setData, lens = 'sven' }){
   const assets = data.assets;
   const vAssets = assets.filter(a => lensMatch(a.owner, lens));
@@ -2364,6 +2508,7 @@ function PortfolioTab({ data, setData, lens = 'sven' }){
   return (
     <div className="stack">
       {lensMatch('sven', lens) && <PortfolioGrowthCard data={data} setData={setData}/>}
+      {lensMatch('sven', lens) && <TimeMachineCard data={data}/>}
       <div className="grid3">
         <BrokerCard title="DEGIRO" total={sum(degiro)} count={degiro.length} unit="positions"/>
         <BrokerCard title="Trade Republic" total={sum(tr)} count={tr.length} unit="positions"/>
