@@ -2745,6 +2745,12 @@ function RentalPropertyCard({ a, data, setData }){
     ? { ...x, fxAmount: isGbp ? (parseFloat(v) || 0) : x.fxAmount, value: isGbp ? (parseFloat(v) || 0) * fx : (parseFloat(v) || 0), lastUpdated: ISO(TODAY) }
     : x) });
   const setRent = v => setData({ ...data, assets: data.assets.map(x => x.id === a.id ? { ...x, rentGBP: parseFloat(v) || 0 } : x) });
+  /* renaming also updates an auto-named linked mortgage, so the two don't drift apart */
+  const setName = v => setData({ ...data,
+    assets: data.assets.map(x => x.id === a.id ? { ...x, name: v } : x),
+    liabilities: (data.liabilities || []).map(l =>
+      (l.linkedAssetId === a.id && String(l.name || '').indexOf('Mortgage · ') === 0)
+        ? { ...l, name: 'Mortgage · ' + v } : l) });
   const addMort = () => setData({ ...data, liabilities: [...liabs, { id:uid(),
     name:'Mortgage \u00b7 ' + a.name, value:0, owner:a.owner || 'sven',
     currency: a.currency || 'EUR', fxAmount: (a.currency === 'GBP' ? 0 : null),
@@ -2763,6 +2769,9 @@ function RentalPropertyCard({ a, data, setData }){
     <div className="card">
       <h2>🏠 {a.name}</h2>
       {a.note && <div className="sub" style={{marginTop:-4, marginBottom:8}}>{a.note}</div>}
+      <div className="kv"><span className="k">Name</span>
+        <span className="v"><input type="text" value={a.name || ''} onChange={e => setName(e.target.value)}
+          placeholder="e.g. Balmoral Court, London" style={{width:200, textAlign:'right'}}/></span></div>
       <div className="kv"><span className="k">Estimated value ({sym})</span>
         <span className="v"><NumInput value={valNative} step={1000} width={120} onChange={setVal}/></span></div>
       {isGbp && <div className="kv"><span className="k">In euro</span><span className="v">{fmt0(eurVal)} <span className="dim small">@ {fx.toFixed(4)}</span></span></div>}
@@ -2859,16 +2868,26 @@ function PropertyTab({ data, setData, lens = 'sven' }){
   const ltv = p.value > 0 ? p.mortgageBalance / p.value * 100 : 0;
   const perM2 = p.size > 0 ? p.value / p.size : 0;
 
+  /* the name lives on the asset, so renaming here also renames it in Net Worth and the Ours combined card */
+  const svenAsset = (data.assets || []).find(a => a.category === 'property' && (a.owner || 'sven') === 'sven') || null;
+  const svenName = svenAsset ? svenAsset.name : 'Property';
+  const setSvenName = v => { if (!svenAsset) return;
+    setData({ ...data, assets: data.assets.map(a => a.id === svenAsset.id ? { ...a, name: v } : a) }); };
+
   const setProp = patch => {
     const np = { ...p, ...patch };
     let assets = data.assets, liabs = data.liabilities;
+    /* sync only SVEN's property/mortgage — matching on "first property" would hit Charlotte's flat
+       whenever her asset happens to sit earlier in the array */
     if ('value' in patch){
       let synced = false;
-      assets = assets.map(a => (!synced && a.category === 'property')
+      assets = assets.map(a => (!synced && a.category === 'property' && (a.owner || 'sven') === 'sven')
         ? (synced = true, { ...a, value: patch.value, lastUpdated: ISO(TODAY) }) : a);
     }
     if ('mortgageBalance' in patch){
-      liabs = liabs.map((l,i) => i === 0 ? { ...l, value: patch.mortgageBalance, lastUpdated: ISO(TODAY) } : l);
+      let done = false;
+      liabs = liabs.map(l => (!done && !l.linkedAssetId && (l.owner || 'sven') === 'sven')
+        ? (done = true, { ...l, value: patch.mortgageBalance, lastUpdated: ISO(TODAY) }) : l);
     }
     setData({ ...data, property: np, assets, liabilities: liabs });
   };
@@ -2918,7 +2937,10 @@ function PropertyTab({ data, setData, lens = 'sven' }){
       {otherProps.map(a => <RentalPropertyCard key={a.id} a={a} data={data} setData={setData}/>)}
       <div className="grid2">
         <div className="card">
-          <h2>🏠 Orchislaan 5-1, Arnhem</h2>
+          <h2>🏠 {svenName}</h2>
+          <div className="kv"><span className="k">Name</span>
+            <span className="v"><input type="text" value={svenName} onChange={e => setSvenName(e.target.value)}
+              placeholder="e.g. Orchislaan 5-1, Arnhem" style={{width:200, textAlign:'right'}}/></span></div>
           <div className="kv"><span className="k">Estimated value <span className="dim">(Funda waardecheck)</span></span>
             <span className="v"><NumInput value={p.value} step={1000} width={110} onChange={v => setProp({ value:v })}/></span></div>
           <div className="kv"><span className="k">Size</span><span className="v">{p.size} m²</span></div>
@@ -5151,6 +5173,10 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   /* instrument-panel extras */
   const hr = TODAY.getHours();
   const greet = hr < 6 ? 'Good night' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
+  const greetName = lens === 'ours' ? 'Sven & Charlotte' : (OWNERS[lens] || 'Sven');
+  const opName = lens === 'charlotte' ? 'C. Cook'
+    : lens === 'ours' ? 'Van Almenkerk · Cook' : 'S. van Almenkerk';
+  const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
   const dayOfYear = Math.floor((TODAY - new Date(TODAY.getFullYear(), 0, 0)) / 86400000);
   const dateLine = TODAY.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
   const contribM = (fp.monthlyContribution || 0) + (lens === 'sven' ? 0 : (fp.charlotteContribution || 0));
@@ -5180,11 +5206,11 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   return (
     <div className="dash">
       <div className="dash-status">
-        <span>Sven Finance <span style={{opacity:.55}}>// v42</span></span>
+        <span>Sven Finance <span style={{opacity:.55}}>// v43</span></span>
         <span className="dstat">
           <span>Lens {(OWNERS[lens] || 'Ours')}</span>
-          <span>{vAssets.length} positions</span>
-          <span>{snaps.length} snapshots</span>
+          <span>{plural(vAssets.length, 'position')}</span>
+          <span>{plural(snaps.length, 'snapshot')}</span>
           <span>GBP {String(fxRate).replace('.', ',')}</span>
           <span>{ISO(TODAY).replace(/-/g, '')}</span>
         </span>
@@ -5194,7 +5220,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
         <Panel n="02" title="Session" meta={nwLabel} to="networth" setTab={setTab} cls="b-session">
           <div className="spread" style={{alignItems:'flex-end', gap:12, flexWrap:'wrap'}}>
             <div style={{minWidth:0}}>
-              <div className="greet">{greet}, <i>Sven</i>.</div>
+              <div className="greet">{greet}, <i>{greetName}</i>.</div>
               <div className="mono-lab" style={{marginTop:5}}>{dateLine} · day {dayOfYear} of 365</div>
             </div>
             <div style={{textAlign:'right'}}>
@@ -5231,7 +5257,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
 
         <Panel n="01" title="Operator" meta="Config" to="settings" setTab={setTab} cls="b-op">
           <div style={{fontFamily:"'Fraunces',Georgia,serif", fontSize:16, fontWeight:500, letterSpacing:'-.2px'}}>
-            S. van Almenkerk</div>
+            {opName}</div>
           <div className="mono-lab" style={{marginTop:2}}>Arnhem · NL</div>
           <div style={{borderTop:'1px solid var(--rule)', margin:'10px 0 8px'}}/>
           <div className="mono-lab">Focus</div>
@@ -5280,7 +5306,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
                 </div>
               ))}
           <div style={{borderTop:'1px solid var(--rule)', marginTop:8, paddingTop:7}} className="mono-lab">
-            {vAssets.length} positions · {vLiabs.length} debts
+            {plural(vAssets.length, 'position')} · {plural(vLiabs.length, 'debt')}
           </div>
         </Panel>
 
