@@ -1372,7 +1372,10 @@ function PeopleFireView({ data, setData, lens }){
   const charContribM = Number(fp.charlotteContribution) || 0;
   const hhContribM = lens === 'ours' ? (svenContribM + charContribM) : (lens === 'charlotte' ? charContribM : svenContribM);
 
-  const fiFp = { ...fp, contributionSchedule: [], monthlyContribution: hhContribM,
+  const svenSched = Array.isArray(fp.contributionSchedule) ? fp.contributionSchedule : [];
+  const hhSched = lens === 'ours' ? svenSched.map(st => ({ fromAge: st.fromAge, monthly: (Number(st.monthly) || 0) + charContribM }))
+                : lens === 'sven' ? svenSched : [];
+  const fiFp = { ...fp, contributionSchedule: hhSched, monthlyContribution: hhContribM,
                  annualWithdrawal: householdSpend, aowEnabled: false,
                  // household pot: two people, so two Box 3 allowances
                  box3Exempt: lens === 'ours' ? (Number(fp.box3Exempt) || 0) * 2 : fp.box3Exempt };
@@ -2418,10 +2421,12 @@ function ledgerFromTx(tx){
            invested, splits, trades };
 }
 
-/* Today's price for a ledger position, from the matching asset (same ISIN): value / shares.
-   Uses the asset's own share count when the portfolio import stored one. */
+/* Today's price for a ledger position, from the matching DEGIRO holding (same ISIN): value / shares.
+   Uses the asset's own share count when the portfolio import stored one. The ledger is built from the
+   DEGIRO export, so a holding at another broker is never used, even if it carries the same ISIN. */
 function livePxFor(p, assets){
-  const a = (assets || []).find(x => x.category === 'stocks' && x.isin && String(x.isin).toUpperCase() === String(p.isin).toUpperCase());
+  const a = (assets || []).find(x => x.category === 'stocks' && x.institutionId === 'degiro' && x.isin
+    && String(x.isin).toUpperCase() === String(p.isin).toUpperCase());
   if (!a || !(a.value > 0)) return null;
   const q = a.quantity > 0 ? a.quantity : p.qty;
   return q > 0 ? a.value / q : null;
@@ -2784,6 +2789,7 @@ function PortfolioTab({ data, setData, lens = 'sven' }){
 
       <div className="card">
         <h2>Allocation by type</h2>
+        {invTotal <= 0 ? <div className="sub">No stocks or crypto in this view yet.</div> : <React.Fragment>
         <div className="kv">
           <span className="k">Index ETFs ({fundLabel(coreF) || 'none'})</span>
           <span className="v">{fmt0(coreTotal)} · {pct1(corePct)}{' '}
@@ -2808,6 +2814,7 @@ function PortfolioTab({ data, setData, lens = 'sven' }){
           <span className="k">Broker cash</span>
           <span className="v">{fmt0(cashTotal)} · {pct1(invTotal ? cashTotal/invTotal*100 : 0)}</span>
         </div>}
+        </React.Fragment>}
 
         <div className="stack mt" style={{gap:8}}>
           {concentrated.size > 0 && (
@@ -5476,7 +5483,8 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
   const dayOfYear = Math.floor((TODAY - new Date(TODAY.getFullYear(), 0, 0)) / 86400000);
   const dateLine = TODAY.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
-  const contribM = (fp.monthlyContribution || 0) + (lens === 'sven' ? 0 : (fp.charlotteContribution || 0));
+  const contribM = lens === 'charlotte' ? (fp.charlotteContribution || 0)
+    : (fp.monthlyContribution || 0) + (lens === 'sven' ? 0 : (fp.charlotteContribution || 0));
   const age = currentAge(fp.birthYear);
   const yrsToTarget = Math.max(0, (fp.targetAge || 55) - age);
   const dInfl = fp.inflation != null ? fp.inflation : 2.5, dGross = fp.grossReturn || 7;
@@ -5509,7 +5517,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   return (
     <div className="dash">
       <div className="dash-status">
-        <span>Sven Finance <span style={{opacity:.55}}>// v48</span></span>
+        <span>Sven Finance <span style={{opacity:.55}}>// v49</span></span>
         <span className="dstat">
           <span>Lens {(OWNERS[lens] || 'Ours')}</span>
           <span>{plural(vAssets.length, 'position')}</span>
