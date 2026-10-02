@@ -239,8 +239,8 @@
   .btn-green{ background:rgba(74,222,128,.15); border-color:rgba(74,222,128,.4); color:var(--green); }
   .btn-icon{ background:none; border:none; cursor:pointer; font-size:14px; padding:3px 5px; border-radius:6px; opacity:.75; }
   .btn-icon:hover{ opacity:1; background:var(--surface2); }
-  .btn:focus-visible,.btn-icon:focus-visible,input:focus-visible,select:focus-visible{ outline:2px solid var(--blue); outline-offset:1px; }
-  input, select{
+  .btn:focus-visible,.btn-icon:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{ outline:2px solid var(--blue); outline-offset:1px; }
+  input, select, textarea{
     background:var(--bg); border:1px solid var(--surface2); color:var(--text);
     border-radius:8px; padding:7px 10px; font:inherit; font-size:13.5px;
   }
@@ -527,7 +527,7 @@ function seedData(){
     fireParams: {
       birthYear:1997, targetAge:52, monthlyContribution:800, charlotteContribution:0, contributionSchedule:[],
       grossReturn:7, inflation:2.5,
-      box3FictitiousReturn:6.17, box3TaxRate:36, box3Exempt:57000,
+      box3FictitiousReturn:6.00, box3TaxRate:36, box3Exempt:59357,
       annualWithdrawal:30000, swr:4,
       aowEnabled:false, aowAge:70, aowAnnualGross:13673, aowBuildPct:100,
       householdSpend:0, rentalHaircut:25,
@@ -624,6 +624,14 @@ function migrate(d){
     if (fpd.pension === undefined) fpd.pension = { enabled:true, startAge:70, accrualFactor:60,
       sven:{ safeNet:1110, employerNet:2045 }, charlotte:{ safeNet:799, employerNet:2996 } };
     if (fpd.pension && d.settings && !d.settings._pensionAge70V1){ fpd.pension.startAge = 70; d.settings._pensionAge70V1 = true; }
+    /* one-time: 2026 Box 3 figures. Overige bezittingen is 6,00% in 2026 (6,17% was the 2023 rate).
+       118.714 is the allowance for two fiscal partners together, shared with the partner's own box 3
+       assets, so the solo model uses the per-person 59.357. Only the exact old values are touched. */
+    if (d.settings && !d.settings._box3y2026V1){
+      if (fpd.box3FictitiousReturn === 6.17) fpd.box3FictitiousReturn = 6.00;
+      if (fpd.box3Exempt === 118714 || fpd.box3Exempt === 57000) fpd.box3Exempt = 59357;
+      d.settings._box3y2026V1 = true;
+    }
   }
   if (!Array.isArray(d.goals)) d.goals = [{ id:'goal-car-2028', name:'New car', icon:'🚗', target:25000, targetDate:'2028-06', saved:0, monthly:0 }];
   /* one-time retro: tag already-imported broker funding (Flatex / DEGIRO / Trade Republic)
@@ -1140,30 +1148,47 @@ function investableOf(assets){
   return (assets || []).filter(isFiAsset).reduce((s,a) => s + (a.value || 0), 0);
 }
 
-/* Grow a pot with no new money, net of Box 3 drag (same rules as simulate). */
-function growNoContrib(p, years, fp, grossPct){
+/* Grow a pot with no new money, net of Box 3 drag (same rules as simulate).
+   t0 = years from today at the start, so the indexed Box 3 allowance lines up with the calendar. */
+function growNoContrib(p, years, fp, grossPct, inflPct, t0){
   let v = p;
-  for (let t = 0; t < years; t++) v = v * (1 + (grossPct - (box3Drag(v, fp) || 0)) / 100);
+  for (let t = 0; t < years; t++) v = v * (1 + (grossPct - (box3Drag(v, fp, (t0 || 0) + t, inflPct) || 0)) / 100);
   return v;
 }
 
 /* Coast number today: the smallest pot that, with no further contributions, grows
    (after Box 3) into the nominal FI target at target age. Bisection, because the
    Box 3 drag makes growth non-linear. */
-function coastNeededToday(targetNominal, years, fp, grossPct){
+function coastNeededToday(targetNominal, years, fp, grossPct, inflPct){
   if (!(targetNominal > 0)) return 0;
   if (years <= 0) return targetNominal;
   let lo = 0, hi = targetNominal;
   for (let i = 0; i < 50; i++){
     const mid = (lo + hi) / 2;
-    if (growNoContrib(mid, years, fp, grossPct) >= targetNominal) hi = mid; else lo = mid;
+    if (growNoContrib(mid, years, fp, grossPct, inflPct, 0) >= targetNominal) hi = mid; else lo = mid;
   }
   return hi;
 }
 
-function box3Drag(p, fp){
-  if (p <= fp.box3Exempt) return 0;
-  return fp.box3FictitiousReturn/100 * fp.box3TaxRate/100 * ((p - fp.box3Exempt) / p) * 100; // %-points
+/* Box 3 drag in %-points of the whole pot (forfaitair system): fictitious return x rate on the part
+   above the allowance. The allowance (heffingsvrij vermogen) is indexed every year, so year t uses
+   today's figure grown with inflation. Without t / inflPct it is today's figure. */
+function box3Drag(p, fp, t, inflPct){
+  const ex = (Number(fp.box3Exempt) || 0) * Math.pow(1 + (Number(inflPct) || 0) / 100, t || 0);
+  if (!(p > ex)) return 0;
+  return fp.box3FictitiousReturn/100 * fp.box3TaxRate/100 * ((p - ex) / p) * 100; // %-points
+}
+
+/* AOW as capital. From aowAge its income offsets withdrawals, so the pot you need when you stop
+   shrinks by the capital that income replaces (A / SWR), discounted from aowAge back to the age you
+   ACTUALLY stop, at the real return. Stopping at 49 leaves AOW 21 years away, worth far less than
+   at 60. */
+function aowCreditAt(fp, retireAge, grossPct, inflPct){
+  if (!fp.aowEnabled) return 0;
+  const A = (Number(fp.aowAnnualGross) || 0) * (Number(fp.aowBuildPct) || 0) / 100;
+  const gapYears = Math.max(0, (Number(fp.aowAge) || 0) - retireAge);
+  const realReturn = Math.max(0.001, (1 + grossPct / 100) / (1 + inflPct / 100) - 1);
+  return (A / (fp.swr/100)) / Math.pow(1 + realReturn, gapYears);
 }
 
 /* Monthly contribution active at a given age: the base amount, stepped up by the schedule. */
@@ -1180,17 +1205,11 @@ function simulate(startNW, fp, grossPct, inflPct){
   const age0 = currentAge(fp.birthYear);
   const targetYear = startYear + (fp.targetAge - age0);
   const fireFull = fp.annualWithdrawal / (fp.swr/100);       // today's money, portfolio-only
-  // AOW lowers the pot you need: its income offsets withdrawals from aowAge onward.
-  // Credit today = capital-equivalent of that income (A / SWR), discounted from aowAge
-  // back to the retirement year at the real (after-inflation) return.
-  let aowCredit = 0;
-  if (fp.aowEnabled){
-    const A = (Number(fp.aowAnnualGross) || 0) * (Number(fp.aowBuildPct) || 0) / 100;
-    const gapYears = Math.max(0, (Number(fp.aowAge) || 0) - fp.targetAge);
-    const realReturn = Math.max(0.001, (grossPct - inflPct) / 100);
-    aowCredit = (A / (fp.swr/100)) / Math.pow(1 + realReturn, gapYears);
-  }
-  const fireNumber = Math.max(0, fireFull - aowCredit);      // today's money
+  // The pot you need depends on WHEN you stop: AOW is valued at that age (aowCreditAt),
+  // so every simulated year gets its own target instead of one number fixed at target age.
+  const needAt = age => Math.max(0, fireFull - aowCreditAt(fp, age, grossPct, inflPct));   // today's money
+  const aowCredit = aowCreditAt(fp, fp.targetAge, grossPct, inflPct);
+  const fireNumber = needAt(fp.targetAge);                   // today's money, stopping at target age
   const horizon = Math.max(fp.targetAge - age0, 1) + 12;     // sim a bit past target
 
   const rows = [];
@@ -1198,11 +1217,11 @@ function simulate(startNW, fp, grossPct, inflPct){
   for (let t = 0; t <= horizon; t++){
     const year = startYear + t, age = age0 + t;
     const real = v / Math.pow(1 + inflPct/100, t);
-    const fireAtT = fireNumber * Math.pow(1 + inflPct/100, t);
+    const fireAtT = needAt(age) * Math.pow(1 + inflPct/100, t);
     rows.push({ year, age, nominal:Math.round(v), real:Math.round(real),
                 fireTarget:Math.round(fireAtT) });
     if (fireYear === null && v >= fireAtT) fireYear = year;
-    const drag = box3Drag(v, fp);
+    const drag = box3Drag(v, fp, t, inflPct);
     const net = (grossPct - drag) / 100;
     const growth = v * net;
     rows[rows.length-1].growth = Math.round(growth);
@@ -1218,18 +1237,20 @@ function simulate(startNW, fp, grossPct, inflPct){
   let coastYear = null;
   for (const r of rows){
     if (r.year > targetYear) break;
-    const grown = growNoContrib(r.nominal, targetYear - r.year, fp, grossPct);
+    const grown = growNoContrib(r.nominal, targetYear - r.year, fp, grossPct, inflPct, r.year - startYear);
     if (grown >= fireAtTarget){ coastYear = r.year; break; }
   }
 
   const atTarget = rows.find(r => r.year === targetYear) || rows[rows.length-1];
+  const fireAge = fireYear !== null ? age0 + (fireYear - startYear) : null;
   return {
-    rows, fireNumber, fireYear,
-    fireAge: fireYear !== null ? age0 + (fireYear - startYear) : null,
+    rows, fireNumber, fireYear, fireAge,
     yearsToFire: fireYear !== null ? fireYear - startYear : null,
     coastYear, coastAge: coastYear !== null ? age0 + (coastYear - startYear) : null,
     realAtTarget: atTarget ? atTarget.real : 0,
     fireAtTarget, targetYear, age0, startYear, fireFull, aowCredit,
+    targetAtFire: fireAge !== null ? needAt(fireAge) : null,                       // today's money
+    aowCreditAtFire: fireAge !== null ? aowCreditAt(fp, fireAge, grossPct, inflPct) : null,
   };
 }
 
@@ -1352,12 +1373,14 @@ function PeopleFireView({ data, setData, lens }){
   const hhContribM = lens === 'ours' ? (svenContribM + charContribM) : (lens === 'charlotte' ? charContribM : svenContribM);
 
   const fiFp = { ...fp, contributionSchedule: [], monthlyContribution: hhContribM,
-                 annualWithdrawal: householdSpend, aowEnabled: false };
+                 annualWithdrawal: householdSpend, aowEnabled: false,
+                 // household pot: two people, so two Box 3 allowances
+                 box3Exempt: lens === 'ours' ? (Number(fp.box3Exempt) || 0) * 2 : fp.box3Exempt };
   const sim = simulate(investable, fiFp, fp.grossReturn, fp.inflation);   // sim.fireNumber === fiNumber
   const pctToFI = fiNumber > 0 ? Math.min(100, investable / fiNumber * 100) : 100;
   const chartRows = sim.rows.filter(r => r.year <= sim.targetYear);
   const yearsToT = Math.max(sim.targetYear - sim.startYear, 0);
-  const coastToday = coastNeededToday(sim.fireAtTarget, yearsToT, fiFp, fp.grossReturn);
+  const coastToday = coastNeededToday(sim.fireAtTarget, yearsToT, fiFp, fp.grossReturn, fp.inflation);
   const incomeM = lens === 'ours' ? (((data.income||{}).sven||0) + ((data.income||{}).charlotte||0)) : (((data.income||{})[lens]) || 0);
   const investRate = incomeM > 0 ? Math.min(100, hhContribM / incomeM * 100) : null;
 
@@ -1376,7 +1399,7 @@ function PeopleFireView({ data, setData, lens }){
   const annuityPV = spendGapBridge * (1 - Math.pow(1 + realR, -bridgeYears)) / realR;
   const latePV = (spendGapLate / (fp.swr / 100)) / Math.pow(1 + realR, bridgeYears);
   const bridgeFund = Math.round(annuityPV + latePV);
-  const hitBridge = sim.rows.find(r => r.nominal >= bridgeFund);
+  const hitBridge = sim.rows.find(r => r.real >= bridgeFund);     // bridgeFund is in today's money, so compare real
   const fireAgeBridge = hitBridge ? hitBridge.age : null;
 
   const setFP = (k,v) => setData({ ...data, fireParams: { ...fp, [k]: v } });
@@ -1497,7 +1520,7 @@ function PeopleFireView({ data, setData, lens }){
 
       {chartRows.length > 1 &&
         <div className="card">
-          <h3>Pot vs FI target</h3>
+          <h3>Pot vs FI target <span className="dim small">(today’s €)</span></h3>
           <div style={{width:'100%', height:240}}>
             <ResponsiveContainer>
               <AreaChart data={chartRows} margin={{top:8,right:12,left:4,bottom:0}}>
@@ -1510,7 +1533,7 @@ function PeopleFireView({ data, setData, lens }){
                 <YAxis tickFormatter={v => '\u20ac' + Math.round(v/1000) + 'k'} tick={{fontSize:11, fill:'var(--muted)'}} width={48}/>
                 <Tooltip formatter={v => fmt0(v)} labelFormatter={a => 'Age ' + a}/>
                 <ReferenceLine y={fiNumber} stroke="var(--red)" strokeDasharray="5 4" label={{value:'FI', fontSize:10, fill:'var(--red)'}}/>
-                <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="nominal" stroke="var(--green)" strokeWidth={2} fill="url(#hhg)"/>
+                <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="real" name="Pot (today’s €)" stroke="var(--green)" strokeWidth={2} fill="url(#hhg)"/>
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -1535,16 +1558,21 @@ function FireTab({ data, setData, lens = 'sven' }){
   const updateStep = (i, k, val) => setSched(sched.map((s, j) => j === i ? { ...s, [k]: val } : s));
   const removeStep = i => setSched(sched.filter((s, j) => j !== i));
 
+  /* One engine, one AOW setting. `base` drives every age on this tab: coast, FIRE, the scenarios,
+     the charts and the footer. `pure` only answers "could the pot carry spend forever with nothing
+     leaned on", which is what the progress bar and its milestones measure. */
   const base = simulate(liquid, fp, fp.grossReturn, fp.inflation);
-  const baseFI = simulate(liquid, { ...fp, aowEnabled: false }, fp.grossReturn, fp.inflation);  // pure FI: spend / SWR, nothing leaned on
+  const pure = fp.aowEnabled ? simulate(liquid, { ...fp, aowEnabled: false }, fp.grossReturn, fp.inflation) : base;
   const pess = simulate(liquid, fp, 5, 3);
   const opt  = simulate(liquid, fp, 9, 2);
   const needed = monthlyNeeded(liquid, fp);
+  const aowOn = !!fp.aowEnabled;
 
-  const yearsToTarget = Math.max(baseFI.targetYear - baseFI.startYear, 0);
-  const coastNumberToday = coastNeededToday(baseFI.fireAtTarget, yearsToTarget, fp, fp.grossReturn);
-  const pctToFI = baseFI.fireNumber > 0 ? liquid / baseFI.fireNumber * 100 : 0;
-  const coastPct = baseFI.fireNumber > 0 ? Math.min(100, coastNumberToday / baseFI.fireNumber * 100) : 0;
+  const fiNumber = pure.fireFull;                              // spend × 25, today's money
+  const yearsToTarget = Math.max(base.targetYear - base.startYear, 0);
+  const coastNumberToday = coastNeededToday(base.fireAtTarget, yearsToTarget, fp, fp.grossReturn, fp.inflation);
+  const pctToFI = fiNumber > 0 ? liquid / fiNumber * 100 : 0;
+  const coastPct = fiNumber > 0 ? Math.min(100, coastNumberToday / fiNumber * 100) : 0;
   const isCoast = liquid >= coastNumberToday;
 
   const chartRows = base.rows.filter(r => r.year <= base.targetYear);
@@ -1569,40 +1597,43 @@ function FireTab({ data, setData, lens = 'sven' }){
         <div className="spread" style={{alignItems:'flex-end', flexWrap:'wrap', gap:8}}>
           <div>
             <div className="metric green" style={{marginBottom:0}}><CountUp value={pctToFI} format={pct1}/></div>
-            <div className="sub">of your {fmt0(baseFI.fireNumber)} FI number — spend × {Math.round(1/(fp.swr/100))}, investments only</div>
+            <div className="sub">of your {fmt0(fiNumber)} FI number · spend × {Math.round(1/(fp.swr/100))}, investments only</div>
           </div>
-          <div className="num muted">{fmt0(liquid)} / {fmt0(baseFI.fireNumber)}</div>
+          <div className="num muted">{fmt0(liquid)} / {fmt0(fiNumber)}</div>
         </div>
         <div style={{position:'relative', height:14, background:'var(--bg)', borderRadius:8, marginTop:14}}>
           <div className="growbar" style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
             background:'linear-gradient(90deg,#4A211C,#5E6B3B)', borderRadius:8, transition:'width .4s'}}/>
-          <div style={{position:'absolute', left:coastPct+'%', top:-5, height:24, width:2, background:'#B98A2E'}} title="Coast FIRE point"></div>
+          <div style={{position:'absolute', left:coastPct+'%', top:-5, height:24, width:2, background:'#B98A2E'}} title={'Coast point: enough to reach your target at ' + fp.targetAge + ' on growth alone'}></div>
         </div>
         <div className="spread" style={{marginTop:6}}>
           <span className="small dim">€0</span>
           <span className="small" style={{color:'#B98A2E'}}>Coast FI · {fmt0(coastNumberToday)}</span>
-          <span className="small dim">{fmt0(baseFI.fireNumber)}</span>
+          <span className="small dim">{fmt0(fiNumber)}</span>
         </div>
-        <Milestones liquid={liquid} target={baseFI.fireNumber} coast={coastNumberToday}/>
-        <div className="sub mt">This is your pure FI target — investments carrying your spend forever. Your AOW + pensions mean the number you’d actually need to <i>stop early</i> is lower; that RE view lives in the Ours tab and the assumptions below.</div>
+        <Milestones liquid={liquid} target={fiNumber} coast={coastNumberToday}/>
+        <div className="sub mt">The bar measures pure FI, investments carrying your spend forever with nothing leaned on. {aowOn
+          ? 'The coast point and both ages below count AOW from ' + fp.aowAge + ', valued at the age you would actually stop, so the earlier you stop the less it helps.'
+          : 'AOW is switched off below, so the ages assume the pot carries everything.'}</div>
         <div className="grid2 mt">
           <div className="card" style={{background:'var(--bg)', borderColor: isCoast ? 'var(--green)' : 'var(--surface2)'}}>
             <h3>🪂 Coast FIRE</h3>
             {isCoast
               ? <div className="big green">Reached ✓</div>
-              : <div className="big num">{baseFI.coastAge !== null ? 'Age ' + baseFI.coastAge : '—'}</div>}
+              : <div className="big num">{base.coastAge !== null ? 'Age ' + base.coastAge : '—'}</div>}
             <div className="sub">{isCoast
-              ? 'You could stop investing today and still reach your number by ' + fp.targetAge + ' on growth alone.'
-              : (baseFI.coastYear ? 'On track to coast in ' + baseFI.coastYear + ' — after that, contributing becomes optional.'
+              ? 'You could stop investing today and still reach your target by ' + fp.targetAge + ' on growth alone.'
+              : (base.coastYear ? 'On track to coast in ' + base.coastYear + '. After that, growth alone gets you to ' + fp.targetAge + (aowOn ? ' (AOW from ' + fp.aowAge + ' included).' : '.')
                                 : 'Keep investing toward the coast point.')}</div>
             {!isCoast && <div className="sub">{fmt0(Math.max(0, coastNumberToday - liquid))} to go.</div>}
           </div>
           <div className="card" style={{background:'var(--bg)'}}>
             <h3>🎯 Full FIRE</h3>
-            <div className="big num">{baseFI.fireAge !== null ? 'Age ' + baseFI.fireAge : '> horizon'}</div>
-            <div className="sub">{baseFI.yearsToFire !== null
-              ? baseFI.yearsToFire + ' years to go · projected ' + baseFI.fireYear
+            <div className="big num">{base.fireAge !== null ? 'Age ' + base.fireAge : '> horizon'}</div>
+            <div className="sub">{base.yearsToFire !== null
+              ? base.yearsToFire + ' years to go · projected ' + base.fireYear + ' · needs ' + fmt0(base.targetAtFire) + ' in today’s €'
               : 'Not reached within the horizon at the current plan.'}</div>
+            {aowOn && <div className="sub" style={{marginTop:4}}>Pure FI without AOW ({fmt0(fiNumber)}): {pure.fireAge !== null ? 'age ' + pure.fireAge + ' (' + pure.fireYear + ')' : 'beyond the horizon'}</div>}
           </div>
         </div>
       </div>
@@ -1633,6 +1664,7 @@ function FireTab({ data, setData, lens = 'sven' }){
           <label className="fld">Safe withdrawal rate
             <NumInput value={fp.swr} step={0.1} onChange={v => setFP('swr', v)} width={75} suffix="%"/></label>
         </div>
+        <div className="sub" style={{marginTop:8}}>Box 3 in 2026 · allowance € 59.357 per person, € 118.714 for two fiscal partners together (shared with the partner’s own box 3 assets) · fictitious return on investments 6,00% · rate 36%. The projection indexes the allowance with inflation every year.</div>
 
         <div className="mt" style={{borderTop:'1px solid var(--surface2)', paddingTop:14}}>
           <label className="row" style={{gap:10, alignItems:'center', cursor:'pointer'}}>
@@ -1649,7 +1681,7 @@ function FireTab({ data, setData, lens = 'sven' }){
                 <NumInput value={fp.aowBuildPct} step={1} onChange={v => setFP('aowBuildPct', v)} width={80} suffix="%"/></label>
             </div>
           )}
-          {fp.aowEnabled && <div className="sub" style={{marginTop:6}}>Single AOW is ~€19.900/jr; samenwonend ~€13.700/jr per person (2026). Opbouw builds 2%/jaar you live in NL between 17 and AOW-age — set below 100% if you spent years abroad.</div>}
+          {fp.aowEnabled && <div className="sub" style={{marginTop:6}}>Full AOW from July 2026 is € 21.203/jr single and € 14.571/jr per person when living together, both including holiday pay (without it € 19.946 and € 13.673). Opbouw builds 2% for every year you live in NL in the 50 years before AOW age, so set it below 100% if you spent years abroad.</div>}
         </div>
 
         <div className="mt" style={{borderTop:'1px solid var(--surface2)', paddingTop:14}}>
@@ -1678,7 +1710,7 @@ function FireTab({ data, setData, lens = 'sven' }){
           Current age: <b className="num">{currentAge(fp.birthYear)}</b> ·
           Box 3 tax drag at current portfolio: <b className="num">{pct1(dragNow)}</b>-pt ·
           Net after-tax return: <b className="num green">{pct1(netNow)}</b> nominal
-          (≈ {pct1(netNow - fp.inflation)} real)
+          (≈ {pct1(((1 + netNow / 100) / (1 + fp.inflation / 100) - 1) * 100)} real)
         </div>
       </div>
 
@@ -1699,6 +1731,7 @@ function FireTab({ data, setData, lens = 'sven' }){
               <Tooltip formatter={(v,n) => [fmt0(v), n]}/>
               <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="nominal" name="Nominal" stroke="#4A211C" fill="#4A211C" fillOpacity={0.25} strokeWidth={2}/>
               <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="real" name="Real (today's €)" stroke="#5E6B3B" fill="#5E6B3B" fillOpacity={0.18} strokeWidth={2}/>
+              <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="fireTarget" name="Pot needed to stop (nominal)" stroke="#A2492B" fillOpacity={0} strokeWidth={1.5} strokeDasharray="5 4"/>
               {base.coastYear && <ReferenceLine x={base.coastYear} stroke="#B98A2E" strokeDasharray="4 4"
                  label={{value:'Coast FIRE', fill:'#B98A2E', fontSize:11, position:'insideTopLeft'}}/>}
               {base.fireYear && base.fireYear <= base.targetYear &&
@@ -1730,11 +1763,11 @@ function FireTab({ data, setData, lens = 'sven' }){
 
       <div className="grid3">
         <div className="card">
-          <h3>Early-retire target <span className="dim small">(AOW-reduced)</span></h3>
-          <div className="metric"><CountUp value={base.fireNumber} format={fmt0}/></div>
-          <div className="sub">In today's money · {fmt0(base.fireAtTarget)} nominal at age {fp.targetAge}</div>
-          {fp.aowEnabled && <div className="sub" style={{marginTop:4}}>
-            <span className="muted">{fmt0(base.fireFull)} without AOW</span> · AOW covers {fmt0(base.fireFull - base.fireNumber)} from age {fp.aowAge}</div>}
+          <h3>Pot needed to stop {aowOn && <span className="dim small">(AOW-reduced)</span>}</h3>
+          <div className="metric"><CountUp value={base.targetAtFire !== null ? base.targetAtFire : base.fireNumber} format={fmt0}/></div>
+          <div className="sub">In today's money, if you stop at {base.fireAge !== null ? base.fireAge : fp.targetAge} · {fmt0(base.fireNumber)} if you stop at {fp.targetAge}</div>
+          {aowOn && <div className="sub" style={{marginTop:4}}>
+            <span className="muted">{fmt0(base.fireFull)} without AOW</span> · AOW from {fp.aowAge} is worth {fmt0(base.aowCreditAtFire !== null ? base.aowCreditAtFire : base.aowCredit)} at {base.fireAge !== null ? base.fireAge : fp.targetAge}, {fmt0(base.aowCredit)} at {fp.targetAge}</div>}
         </div>
         <div className="card">
           <h3>Years remaining</h3>
@@ -1755,10 +1788,10 @@ function FireTab({ data, setData, lens = 'sven' }){
       </div>
       <div className="card" style={{padding:'10px 16px'}}>
         <span className="small muted">
-          Coast FIRE reached at age <b className="num">{base.coastAge !== null ? base.coastAge : '—'}</b> — after that, contributions become optional. ·
+          Coast FIRE reached at age <b className="num">{base.coastAge !== null ? base.coastAge : '—'}</b>, after that contributions become optional. ·
           {fp.aowEnabled
-            ? <span> AOW included — {fmt0(fp.aowAnnualGross * fp.aowBuildPct / 100)}/jr from age {fp.aowAge} ({fp.aowBuildPct}% opbouw), lowering your target by {fmt0(base.fireFull - base.fireNumber)}.</span>
-            : <span> AOW excluded — toggle it on in Assumptions to fold in the state pension (est. age 70+ for 1997).</span>}
+            ? <span> AOW included · {fmt0(fp.aowAnnualGross * fp.aowBuildPct / 100)}/jr from age {fp.aowAge} ({fp.aowBuildPct}% opbouw), lowering the pot you need by {fmt0(base.aowCreditAtFire !== null ? base.aowCreditAtFire : base.aowCredit)} if you stop at {base.fireAge !== null ? base.fireAge : fp.targetAge}.</span>
+            : <span> AOW excluded · toggle it on in Assumptions to fold in the state pension (est. age 70+ for 1997).</span>}
         </span>
       </div>
     </div>
@@ -2321,6 +2354,92 @@ function parseDegiroCsv(text){
   return { tx };
 }
 
+/* One ledger for everything built on Transactions.csv: the growth curve, the time machine,
+   hall of fame and cost basis. Average-cost method: a buy adds its full cost incl. fees
+   (-Totaal EUR), a sell releases cost pro rata. A stock split arrives as an opposite-signed pair
+   on the same day and ISIN whose cash nets to zero; it changes share count and price, never cost
+   (treated as a buy it would dilute the average and inflate the return). */
+function ledgerFromTx(tx){
+  const sorted = (tx || []).slice().sort((a,b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+  const byKey = {};
+  sorted.forEach((t, i) => { if (t.qty){ const k = t.date + '|' + t.isin; (byKey[k] = byKey[k] || []).push(i); } });
+  const role = {}, splitAt = {}, splits = [];
+  Object.keys(byKey).forEach(k => {
+    const ix = byKey[k];
+    if (ix.length !== 2) return;
+    const a = sorted[ix[0]], b = sorted[ix[1]];
+    if ((a.qty > 0) === (b.qty > 0)) return;
+    if (Math.abs((a.totalEur || 0) + (b.totalEur || 0)) > 0.5) return;          // a real round trip leaves cash behind
+    const oi = a.qty < 0 ? ix[0] : ix[1], ii = a.qty < 0 ? ix[1] : ix[0];
+    const out = sorted[oi], inn = sorted[ii];
+    const vo = Math.abs(out.valueEur || 0), vi = Math.abs(inn.valueEur || 0);
+    if (Math.abs(vo - vi) > Math.max(0.5, 0.02 * Math.max(vo, vi))) return;
+    if (Math.abs(out.qty) === Math.abs(inn.qty)) return;
+    const factor = Math.abs(inn.qty / out.qty);
+    role[oi] = 'out'; role[ii] = 'in'; splitAt[k] = factor;
+    splits.push({ date: inn.date, isin: inn.isin, factor });
+  });
+  const pos = {}, byDate = {}, trades = [];
+  let invested = 0;
+  sorted.forEach((t, i) => {
+    trades.push({ t, split: !!role[i] });
+    invested += -(t.totalEur || 0);
+    if (!t.qty) return;
+    const p = pos[t.isin] = pos[t.isin] || { isin:t.isin, name:t.name, qty:0, cost:0, px:0, obs:0, realized:0, lastDate:'' };
+    if (role[i] === 'out'){ p.qty += t.qty; }
+    else if (role[i] === 'in'){
+      p.qty += t.qty;
+      const f = splitAt[t.date + '|' + t.isin] || 1;
+      p.px = (t.valueEur > 0) ? t.valueEur / Math.abs(t.qty) : p.px / f;
+    } else if (t.qty > 0){
+      const paid = -(t.totalEur || 0);
+      p.cost += paid > 0 ? paid : (t.valueEur || 0);
+      p.qty += t.qty;
+      if (t.valueEur > 0) p.px = t.valueEur / t.qty;
+      p.obs++; p.lastDate = t.date;
+    } else {
+      const sold = Math.min(-t.qty, p.qty);
+      const avg = p.qty > 0 ? p.cost / p.qty : 0;
+      p.realized += (t.totalEur || t.valueEur || 0) - avg * sold;
+      p.cost -= avg * sold;
+      p.qty += t.qty;
+      if (t.valueEur > 0) p.px = t.valueEur / Math.abs(t.qty);
+      p.obs++; p.lastDate = t.date;
+      if (p.qty < 1e-9){ p.qty = 0; p.cost = 0; }
+    }
+    let value = 0; for (const k in pos) value += pos[k].qty * (pos[k].px || 0);
+    byDate[t.date] = { date:t.date, value:Math.round(value), invested:Math.round(invested) };
+  });
+  const list = Object.keys(pos).map(k => pos[k]);
+  return { pos, list, held: list.filter(p => p.qty > 1e-6), points: Object.keys(byDate).sort().map(d => byDate[d]),
+           invested, splits, trades };
+}
+
+/* Today's price for a ledger position, from the matching asset (same ISIN): value / shares.
+   Uses the asset's own share count when the portfolio import stored one. */
+function livePxFor(p, assets){
+  const a = (assets || []).find(x => x.category === 'stocks' && x.isin && String(x.isin).toUpperCase() === String(p.isin).toUpperCase());
+  if (!a || !(a.value > 0)) return null;
+  const q = a.quantity > 0 ? a.quantity : p.qty;
+  return q > 0 ? a.value / q : null;
+}
+
+/* Quarter/half-year/year ticks for a time axis, as UTC ms. */
+function timeTicks(t0, t1){
+  if (!(t1 > t0)) return [t0];
+  const d0 = new Date(t0), months = (t1 - t0) / (30.44 * 86400000);
+  const step = months <= 18 ? 3 : months <= 48 ? 6 : 12;
+  let y = d0.getUTCFullYear(), m = Math.floor(d0.getUTCMonth() / step) * step + step;
+  const out = [];
+  for (let k = 0; k < 200; k++){
+    while (m >= 12){ m -= 12; y++; }
+    const ts = Date.UTC(y, m, 1);
+    if (ts > t1) break;
+    out.push(ts); m += step;
+  }
+  return out;
+}
+
 function PortfolioGrowthCard({ data, setData }){
   const fileRef = useRef(null);
   const tx = data.portfolioTx || [];
@@ -2345,22 +2464,18 @@ function PortfolioGrowthCard({ data, setData }){
   };
   const clearAll = () => { if (confirm('Remove all imported portfolio transactions?')) setData({ ...data, portfolioTx: [] }); };
 
-  const sorted = tx.slice().sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
-  const qty = {}, px = {};
-  let invested = 0;
-  const byDate = {}, sigByDate = {};
-  sorted.forEach(t => {
-    if (t.qty){ px[t.isin] = t.valueEur / Math.abs(t.qty); qty[t.isin] = (qty[t.isin] || 0) + t.qty; }
-    invested += -t.totalEur;
-    let value = 0; for (const i in qty){ value += qty[i] * (px[i] || 0); }
-    byDate[t.date] = { date: t.date, value: Math.round(value), invested: Math.round(invested) };
-    if (t.qty > 0 && t.valueEur >= thr){
+  const L = ledgerFromTx(tx);
+  const sigByDate = {};
+  L.trades.forEach(x => {
+    const t = x.t;
+    if (!x.split && t.qty > 0 && t.valueEur >= thr){
       sigByDate[t.date] = sigByDate[t.date] || { amt:0, names:[] };
       sigByDate[t.date].amt += t.valueEur;
       if (sigByDate[t.date].names.indexOf(t.name) < 0) sigByDate[t.date].names.push(t.name);
     }
   });
-  const points = Object.keys(byDate).sort().map(d => ({ ...byDate[d], sig: sigByDate[d] ? Math.round(sigByDate[d].amt) : 0 }));
+  const tsOf = d => Date.parse(d + 'T12:00:00Z');
+  const points = L.points.map(pt => ({ ...pt, ts: tsOf(pt.date), sig: sigByDate[pt.date] ? Math.round(sigByDate[pt.date].amt) : 0 }));
   // anchor the endpoint to the live DEGIRO positions in the asset list (ex cash),
   // so "today" reads true while the historic curve keeps last-trade prices.
   const degiroNow = (data.assets || []).filter(a => a.category === 'stocks' && a.institutionId === 'degiro' && !/^Cash/i.test(a.name))
@@ -2369,12 +2484,13 @@ function PortfolioGrowthCard({ data, setData }){
   if (points.length && degiroNow > 0){
     const lp = points[points.length - 1];
     const today = ISO(TODAY);
-    if (today > lp.date){ points.push({ date: today, value: Math.round(degiroNow), invested: lp.invested, sig: 0 }); anchored = true; }
+    if (today > lp.date){ points.push({ date: today, ts: tsOf(today), value: Math.round(degiroNow), invested: lp.invested, sig: 0 }); anchored = true; }
   }
   const last = points.length ? points[points.length - 1] : null;
   const growth = last ? last.value - last.invested : 0;
   const growthPct = last && last.invested > 0 ? (last.value / last.invested - 1) * 100 : 0;
   const sigList = Object.keys(sigByDate).sort().reverse().map(d => ({ date:d, amt:sigByDate[d].amt, names:sigByDate[d].names }));
+  const ticks = points.length ? timeTicks(points[0].ts, points[points.length - 1].ts) : [];
 
   const SigDot = props => {
     const pl = props.payload || {};
@@ -2409,9 +2525,10 @@ function PortfolioGrowthCard({ data, setData }){
                 <stop offset="100%" stopColor="var(--green)" stopOpacity={0.03}/>
               </linearGradient></defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--rule)"/>
-              <XAxis dataKey="date" tick={{fontSize:10, fill:'var(--muted)'}} minTickGap={34} tickFormatter={d => d.slice(2,7)}/>
+              <XAxis dataKey="ts" type="number" scale="time" domain={['dataMin', 'dataMax']} ticks={ticks}
+                tick={{fontSize:10, fill:'var(--muted)'}} minTickGap={18} tickFormatter={ts => ISO(new Date(ts)).slice(2,7)}/>
               <YAxis tickFormatter={v => '€' + Math.round(v/1000) + 'k'} tick={{fontSize:11, fill:'var(--muted)'}} width={46}/>
-              <Tooltip formatter={v => fmt0(v)} labelFormatter={d => d}/>
+              <Tooltip formatter={v => fmt0(v)} labelFormatter={ts => ISO(new Date(ts))}/>
               <Area animationDuration={850} animationEasing="ease-out" type="monotone" dataKey="value" name="Total value" stroke="var(--green)" strokeWidth={2} fill="url(#pfg)" dot={SigDot}/>
               <Area animationDuration={850} animationEasing="ease-out" type="stepAfter" dataKey="invested" name="Money in" stroke="#4A211C" strokeWidth={1.6} strokeDasharray="5 3" fillOpacity={0}/>
             </AreaChart>
@@ -2446,9 +2563,11 @@ function TimeMachineCard({ data }){
   const tx = (data.portfolioTx || []).slice().sort((a,b) => (a.date + a.time).localeCompare(b.date + b.time));
   const fp = data.fireParams || {};
 
+  const L = ledgerFromTx(tx);
   const buysByIsin = {};
-  tx.forEach(t => {
-    if (t.qty > 0){
+  L.trades.forEach(x => {
+    const t = x.t;
+    if (!x.split && t.qty > 0){
       const b = buysByIsin[t.isin] = buysByIsin[t.isin] || { n:0, name:t.name };
       b.n++;
     }
@@ -2458,7 +2577,10 @@ function TimeMachineCard({ data }){
   const mainName = mainIsin ? (buysByIsin[mainIsin].name || '').split(' ').slice(0,2).join(' ') : '';
 
   const priceByMonth = {};
-  tx.filter(t => t.isin === mainIsin && t.qty).forEach(t => { priceByMonth[t.date.slice(0,7)] = t.valueEur / Math.abs(t.qty); });
+  L.trades.forEach(x => { const t = x.t;
+    if (!x.split && t.isin === mainIsin && t.qty && t.valueEur > 0) priceByMonth[t.date.slice(0,7)] = t.valueEur / Math.abs(t.qty); });
+  const splitByMonth = {};
+  L.splits.filter(sp => sp.isin === mainIsin).forEach(sp => { splitByMonth[sp.date.slice(0,7)] = (splitByMonth[sp.date.slice(0,7)] || 1) * sp.factor; });
   const tradedMonths = Object.keys(priceByMonth).sort();
 
   const [amt, setAmt] = useState(100);
@@ -2486,6 +2608,7 @@ function TimeMachineCard({ data }){
   }
   let units = 0, spent = 0, lastPx = priceByMonth[firstM];
   months.forEach(mk => {
+    if (splitByMonth[mk]) units *= splitByMonth[mk];      // counterfactual shares split too
     if (priceByMonth[mk]) lastPx = priceByMonth[mk];
     units += amt / lastPx;
     spent += amt;
@@ -2493,29 +2616,19 @@ function TimeMachineCard({ data }){
   const valueNow = units * lastPx;
   const delta = valueNow - spent;
 
-  const pos = {};
-  tx.forEach(t => {
-    const p = pos[t.isin] = pos[t.isin] || { name:t.name, qty:0, buyEur:0, buyQty:0, lastPx:0, obs:0 };
-    if (t.qty){
-      p.lastPx = t.valueEur / Math.abs(t.qty);
-      p.obs++;
-      p.qty += t.qty;
-      if (t.qty > 0){ p.buyEur += t.valueEur; p.buyQty += t.qty; }
-    }
-  });
   const shortName = n => { const w = (n || '').split(' '); return (w[0] && w[0].length < 4 ? w.slice(0,3) : w.slice(0,2)).join(' '); };
   const ranked = [];
-  for (const i in pos){
-    const p = pos[i];
-    /* obs >= 2: a single-trade position has no price after purchase, so its "return" is always 0 — meaningless */
-    if (p.qty > 0.0001 && p.buyQty > 0 && p.obs >= 2){
-      const avg = p.buyEur / p.buyQty;
-      ranked.push({ name:shortName(p.name), ret:(p.lastPx / avg - 1) * 100, gain:(p.lastPx - avg) * p.qty });
-    }
-  }
+  L.held.forEach(p => {
+    if (!(p.cost > 0)) return;
+    const live = livePxFor(p, data.assets);
+    /* without a live price a single-trade position has no price after purchase: skip it */
+    if (!live && p.obs < 2) return;
+    const px = live || p.px, avg = p.cost / p.qty;
+    ranked.push({ key:p.isin, name:shortName(p.name), ret:(px / avg - 1) * 100, gain:(px - avg) * p.qty, live:!!live });
+  });
   ranked.sort((a,b) => b.ret - a.ret);
-  const fame = ranked.slice(0, 3);
-  const pain = ranked.slice(-3).reverse().filter(r => fame.indexOf(r) < 0);
+  const fame = ranked.filter(r => r.ret >= 0).slice(0, 3);
+  const pain = ranked.filter(r => r.ret < 0).reverse().slice(0, 3);   // worst first, losers only
 
   const targetAge = fp.targetAge || 55;
   const age = currentAge(fp.birthYear);
@@ -2523,6 +2636,7 @@ function TimeMachineCard({ data }){
   const rm = Math.pow(1 + (fp.grossReturn || 7) / 100, 1/12) - 1;
   const nM = yrs * 12;
   const fv = fw * ((Math.pow(1 + rm, nM) - 1) / rm);
+  const fvReal = fv / Math.pow(1 + (fp.inflation != null ? fp.inflation : 2.5) / 100, yrs);
   const coffeeM = 3.5 * 30.4;
   const fvCoffee = coffeeM * ((Math.pow(1 + rm, nM) - 1) / rm);
 
@@ -2556,19 +2670,21 @@ function TimeMachineCard({ data }){
       <h3 className="mt">Hall of fame &amp; pain</h3>
       <div className="grid2">
         <div>
+          {fame.length === 0 && <div className="sub">No position is above its average cost yet.</div>}
           {fame.map(r => (
-            <div key={r.name} className="kv"><span className="k">🏆 {r.name}</span>
+            <div key={r.key} className="kv"><span className="k">🏆 {r.name}</span>
               <span className="v green">{(r.ret >= 0 ? '+' : '') + r.ret.toFixed(0)}% · {fmt0(r.gain)}</span></div>
           ))}
         </div>
         <div>
+          {pain.length === 0 && <div className="sub">Nothing in the red right now.</div>}
           {pain.map(r => (
-            <div key={r.name} className="kv"><span className="k">🧊 {r.name}</span>
+            <div key={r.key} className="kv"><span className="k">🧊 {r.name}</span>
               <span className="v" style={{color: r.ret < 0 ? 'var(--red)' : 'var(--dim)'}}>{(r.ret >= 0 ? '+' : '') + r.ret.toFixed(0)}% · {fmt0(r.gain)}</span></div>
           ))}
         </div>
       </div>
-      <div className="sub">Returns vs your average buy price, at last-trade prices — only positions the market has repriced since purchase (traded more than once) qualify.</div>
+      <div className="sub">Returns against your average cost including fees. Priced at today’s asset values where the ISIN matches a holding, otherwise at your last trade (those need two trades to qualify). Losers only on the right.</div>
 
       <h3 className="mt">Forward time machine</h3>
       <div className="row" style={{gap:10, alignItems:'center', flexWrap:'wrap', margin:'6px 0'}}>
@@ -2576,8 +2692,9 @@ function TimeMachineCard({ data }){
         <NumInput value={fw} step={25} min={5} width={80} onChange={setFw} suffix="/mo"/>
         <span className="small dim">from today until {targetAge} becomes</span>
         <span className="num" style={{color:'var(--green)', fontWeight:700}}>{fmt0(fv)}</span>
+        <span className="small dim">≈ {fmt0(fvReal)} in today’s money</span>
       </div>
-      <div className="sub">At your {fp.grossReturn || 7}% assumption over {yrs} years. For scale: a €3,50-a-day coffee habit is {fmt0(fvCoffee)} by then.</div>
+      <div className="sub">At your {fp.grossReturn || 7}% assumption over {yrs} years, before Box 3. For scale, a €3,50-a-day coffee habit is {fmt0(fvCoffee)} by then.</div>
 
       <div className="sub mt" style={{borderTop:'1px solid var(--rule)', paddingTop:8}}>Counterfactuals are priced with your own {mainName} trades (monthly resolution, from {firstM}). Zero-guilt clause: the coffee was probably worth it — this is fuel for the next euro, not a court for the last one.</div>
     </div>
@@ -2599,13 +2716,37 @@ function PortfolioTab({ data, setData, lens = 'sven' }){
   const tr     = stocks.filter(a => a.institutionId === 'trade-republic');
   const coins  = new Set(crypto.map(a => { const m = a.name.match(/\(([A-Z]+)\)/); return m ? m[1] : a.name; }));
 
-  const isETF  = a => /ETF/i.test(a.name);
+  /* Funds by name OR by ISIN: Irish/Luxembourg ISINs are funds for EU retail, and broker exports
+     truncate names (DEGIRO's "ISHARES CORE MSCI EM IMI UCITS E" lost its "ETF"). Thematic funds
+     are bets, so they do not count toward the index core. */
   const isCash = a => /^Cash/i.test(a.name);
-  const etfs   = stocks.filter(isETF);
-  const indiv  = stocks.filter(a => !isETF(a) && !isCash(a));
-  const etfTotal = sum(etfs), indivTotal = sum(indiv);
-  const etfPct = invTotal ? etfTotal/invTotal*100 : 0;
+  const isFund = a => /\b(ETF|ETC|ETN|UCITS)\b|ishares|vanguard|xtrackers|amundi|spdr|lyxor|invesco|wisdomtree|vaneck|global ?x/i.test(a.name || '')
+                   || /^(IE|LU)[0-9A-Z]{10}$/i.test(String(a.isin || ''));
+  const isThematic = a => /uranium|clean energy|robot|semicond|cyber|lithium|batter|hydrogen|blockchain|cannabis|gold miner|defen[cs]e|space|genomic/i.test(a.name || '');
+  const etfs   = stocks.filter(a => !isCash(a) && isFund(a));
+  const coreF  = etfs.filter(a => !isThematic(a)), themF = etfs.filter(isThematic);
+  const indiv  = stocks.filter(a => !isCash(a) && !isFund(a));
+  const cashS  = stocks.filter(isCash);
+  const coreTotal = sum(coreF), themTotal = sum(themF), indivTotal = sum(indiv), cashTotal = sum(cashS);
+  const corePct = invTotal ? coreTotal/invTotal*100 : 0;
   const cryptoPct = invTotal ? cryptoTotal/invTotal*100 : 0;
+  const fundLabel = arr => { const seen = {}, out = [];
+    arr.forEach(e => { const w = e.name.split(' ')[0], k = w.toLowerCase(); if (!seen[k]){ seen[k] = 1; out.push(w); } });
+    return out.join(' + '); };
+
+  /* cost basis from Transactions.csv for DEGIRO holdings with an ISIN; a manual figure always wins */
+  const ledger = ledgerFromTx(data.portfolioTx || []);
+  const ledByIsin = {}; ledger.held.forEach(p => { ledByIsin[String(p.isin).toUpperCase()] = p; });
+  const csvCost = a => {
+    if (a.category !== 'stocks' || a.institutionId !== 'degiro' || !a.isin) return null;
+    const p = ledByIsin[String(a.isin).toUpperCase()];
+    if (!p || !(p.qty > 0) || !(p.cost > 0)) return null;
+    if (a.quantity > 0 && Math.abs(a.quantity - p.qty) / p.qty > 0.01) return null;   // CSV is older than the holding
+    return Math.round(p.cost * 100) / 100;
+  };
+  const costOf = a => a.costBasis ? a.costBasis : csvCost(a);
+  const watchText = data.watchlistNote != null ? data.watchlistNote
+    : 'On radar: GOOGL (Alphabet), AI growth thesis. Also considered: Visa (V), Novo Nordisk (NVO), AMD, Salesforce.';
 
   const concentrated = new Set(indiv.filter(a => stocksTotal > 0 && a.value/stocksTotal > 0.15).map(a => a.id));
   const sp500 = vAssets.filter(a => /S&P 500/i.test(a.name));
@@ -2613,10 +2754,9 @@ function PortfolioTab({ data, setData, lens = 'sven' }){
   const sp500Ids = new Set(sp500.map(a => a.id));
 
   const positions = [...stocks, ...crypto].sort((a,b) => b.value - a.value);
-  const catTotal = a => a.category === 'stocks' ? stocksTotal : cryptoTotal;
 
-  const withCost = positions.filter(a => a.costBasis);
-  const invested = withCost.reduce((s,a) => s + a.costBasis, 0);
+  const withCost = positions.filter(a => costOf(a));
+  const invested = withCost.reduce((s,a) => s + costOf(a), 0);
   const curOfThose = withCost.reduce((s,a) => s + a.value, 0);
   const gainTotal = curOfThose - invested;
   const gainPct = invested > 0 ? gainTotal / invested * 100 : 0;
@@ -2636,19 +2776,23 @@ function PortfolioTab({ data, setData, lens = 'sven' }){
       <div className="grid3">
         <BrokerCard title="DEGIRO" total={sum(degiro)} count={degiro.length} unit="positions"/>
         <BrokerCard title="Trade Republic" total={sum(tr)} count={tr.length} unit="positions"/>
-        <BrokerCard title="Crypto (Kluis + Wallet 2)" total={cryptoTotal} count={coins.size} unit="coins"/>
+        <BrokerCard title={'Crypto (' + Array.from(new Set(crypto.map(a => instName(data, a.institutionId)))).join(' + ') + ')'} total={cryptoTotal} count={coins.size} unit="coins"/>
       </div>
 
       <div className="card">
         <h2>Allocation by type</h2>
         <div className="kv">
-          <span className="k">ETFs ({etfs.map(e => e.name.split(' ')[0]).join(' + ')})</span>
-          <span className="v">{fmt0(etfTotal)} · {pct1(etfPct)}{' '}
-            {etfPct >= 60
+          <span className="k">Index ETFs ({fundLabel(coreF) || 'none'})</span>
+          <span className="v">{fmt0(coreTotal)} · {pct1(corePct)}{' '}
+            {corePct >= 60
               ? <span className="badge badge-green">Healthy core</span>
               : <span className="badge" style={{background:'rgba(251,191,36,.15)', color:'var(--yellow)'}}>Below 60% core</span>}
           </span>
         </div>
+        {themF.length > 0 && <div className="kv">
+          <span className="k">Thematic ETFs ({fundLabel(themF)})</span>
+          <span className="v">{fmt0(themTotal)} · {pct1(invTotal ? themTotal/invTotal*100 : 0)}</span>
+        </div>}
         <div className="kv">
           <span className="k">Individual stocks</span>
           <span className="v">{fmt0(indivTotal)} · {pct1(invTotal ? indivTotal/invTotal*100 : 0)}</span>
@@ -2657,6 +2801,10 @@ function PortfolioTab({ data, setData, lens = 'sven' }){
           <span className="k">Crypto</span>
           <span className="v">{fmt0(cryptoTotal)} · {pct1(cryptoPct)}</span>
         </div>
+        {cashTotal > 0 && <div className="kv">
+          <span className="k">Broker cash</span>
+          <span className="v">{fmt0(cashTotal)} · {pct1(invTotal ? cashTotal/invTotal*100 : 0)}</span>
+        </div>}
 
         <div className="stack mt" style={{gap:8}}>
           {concentrated.size > 0 && (
@@ -2695,13 +2843,14 @@ function PortfolioTab({ data, setData, lens = 'sven' }){
       )}
 
       <div className="card">
-        <h2>Positions <span className="muted small">· set a cost basis to track gain</span></h2>
+        <h2>Positions <span className="muted small">· cost basis from your DEGIRO CSV where the ISIN matches, or set one</span></h2>
+        <div style={{overflowX:'auto', WebkitOverflowScrolling:'touch'}}>
         <table>
           <thead>
-            <tr><th>Name</th><th>Broker</th><th className="r">Value</th><th className="r">Cost basis</th><th className="r">Gain</th><th className="r">% cat</th><th>Notes</th></tr>
+            <tr><th>Name</th><th>Broker</th><th className="r">Value</th><th className="r">Cost basis</th><th className="r">Gain</th><th className="r" title="Share of stocks + crypto">Weight</th><th>Notes</th></tr>
           </thead>
           <tbody>
-            {positions.map(a => (
+            {positions.map(a => { const cb = costOf(a), fromCsv = !a.costBasis && !!cb; return (
               <tr key={a.id}>
                 <td style={{fontWeight:600}}>
                   <span style={{display:'inline-flex', alignItems:'center'}}><HoldingIcon asset={a}/>{a.name}</span>
@@ -2711,34 +2860,44 @@ function PortfolioTab({ data, setData, lens = 'sven' }){
                 <td className="r">
                   {a.costBasis
                     ? <NumInput value={a.costBasis} step={1} width={86} onChange={v => setCost(a.id, v)}/>
-                    : <button className="btn" style={{padding:'2px 8px', fontSize:12}} onClick={() => setCost(a.id, Math.round(a.value))}>set</button>}
+                    : fromCsv
+                      ? <span className="num" title="Average cost incl. fees from Transactions.csv. Click to edit it by hand.">
+                          <span className="dim small">csv </span>
+                          <button className="btn-icon num" style={{fontSize:13, opacity:1}} onClick={() => setCost(a.id, cb)}>{fmt0(cb)}</button>
+                        </span>
+                      : <button className="btn" style={{padding:'2px 8px', fontSize:12}} onClick={() => setCost(a.id, Math.round(a.value))}>set</button>}
                 </td>
                 <td className="r num">
-                  {a.costBasis
-                    ? <span className={a.value - a.costBasis >= 0 ? 'green' : 'red'}>
-                        {(a.value - a.costBasis >= 0 ? '+' : '') + fmt0(a.value - a.costBasis)}
-                        <span className="small"> ({(a.value - a.costBasis >= 0 ? '+' : '') + pct1(a.costBasis > 0 ? (a.value - a.costBasis)/a.costBasis*100 : 0)})</span>
+                  {cb
+                    ? <span className={a.value - cb >= 0 ? 'green' : 'red'}>
+                        {(a.value - cb >= 0 ? '+' : '') + fmt0(a.value - cb)}
+                        <span className="small"> ({(a.value - cb >= 0 ? '+' : '') + pct1(cb > 0 ? (a.value - cb)/cb*100 : 0)})</span>
                       </span>
                     : <span className="dim">—</span>}
                 </td>
-                <td className="r num muted">{pct1(catTotal(a) ? a.value/catTotal(a)*100 : 0)}</td>
+                <td className="r num muted">{pct1(invTotal ? a.value/invTotal*100 : 0)}</td>
                 <td>
                   {concentrated.has(a.id) && <span className="badge" style={{background:'rgba(251,191,36,.15)', color:'var(--yellow)'}}>Concentrated</span>}
                   {sp500Overlap && sp500Ids.has(a.id) && <span className="badge badge-blue">S&P 500 overlap</span>}
                 </td>
               </tr>
-            ))}
+            ); })}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div className="card" style={{borderStyle:'dashed'}}>
         <h3>Watchlist / on radar</h3>
-        <div className="small muted" style={{lineHeight:1.6}}>
-          On radar: <b style={{color:'var(--text)'}}>GOOGL (Alphabet)</b> — AI growth thesis.
-          Also considered: Visa (V), Novo Nordisk (NVO), AMD, Salesforce.
-          No action taken yet. Current market broadly elevated — consider waiting for dip.
-        </div>
+        <textarea value={watchText}
+          onChange={e => setData({ ...data, watchlistNote: e.target.value })} rows={3}
+          style={{width:'100%', resize:'vertical', lineHeight:1.5}}/>
+        {(() => {
+          const note = String(watchText).toLowerCase();
+          const held = stocks.filter(a => { const w = String(a.name).toLowerCase().split(' ')[0];
+            return !isCash(a) && w.length >= 4 && note.indexOf(w) >= 0; });
+          return held.length > 0 ? <div className="sub" style={{marginTop:4}}>Already held · {held.map(a => a.name).join(', ')}</div> : null;
+        })()}
       </div>
     </div>
   );
@@ -2773,6 +2932,40 @@ function addMonths(date, m){
   const d = new Date(date); d.setMonth(d.getMonth() + m); return d;
 }
 const fmtMonthYear = d => new Intl.DateTimeFormat('nl-NL', { month:'long', year:'numeric' }).format(d);
+
+/* Overpay vs invest on the SAME cash flow and the SAME horizon (today until the current payoff
+   date, when both loans are gone). A sends payment + extra to the loan and, once it is paid off,
+   invests that whole amount. B pays the normal schedule and invests the extra from day one.
+   Both reinvest the mortgage-interest refund (hypotheekrenteaftrek), which is larger in B because
+   B pays more interest. The two pots at the horizon are the whole difference. */
+function overpayVsInvest(balance, ratePct, payment, extra, investPct, deductPct){
+  const r = ratePct / 100 / 12;
+  const ri = Math.pow(1 + investPct / 100, 1 / 12) - 1;
+  const tax = Math.max(0, Number(deductPct) || 0) / 100;
+  const cash = payment + extra;
+  if (!(balance > 0) || payment <= balance * r) return null;
+  let bA = balance, bB = balance, potA = 0, potB = 0, intA = 0, intB = 0, nA = null, n = 0;
+  while (bB > 0.005 && n < 1200){
+    const iB = bB * r; intB += iB;
+    const payB = Math.min(payment, bB + iB);
+    bB = bB + iB - payB;
+    potB = potB * (1 + ri) + extra + (payment - payB) + iB * tax;
+    if (bA > 0.005){
+      const iA = bA * r; intA += iA;
+      const payA = Math.min(cash, bA + iA);
+      bA = bA + iA - payA;
+      potA = potA * (1 + ri) + (cash - payA) + iA * tax;
+      if (bA <= 0.005) nA = n + 1;
+    } else {
+      potA = potA * (1 + ri) + cash;
+    }
+    n++;
+  }
+  if (nA === null) nA = n;
+  return { months:n, monthsA:nA, monthsShaved:n - nA, intA, intB,
+    interestSavedGross: intB - intA, interestSavedNet: (intB - intA) * (1 - tax),
+    potA, potB, edge: potB - potA, contributed: extra * n, netRate: ratePct * (1 - tax) };
+}
 
 function PropertyAssetCard({ a }){
   const v = a.value || 0;
@@ -2982,21 +3175,13 @@ function PropertyTab({ data, setData, lens = 'sven' }){
   }
 
   /* overpay vs invest */
-  const baseline = amortize(p.mortgageBalance, rate, MORTGAGE_PAYMENT, 0);
-  const boosted  = amortize(p.mortgageBalance, rate, MORTGAGE_PAYMENT, extra);
-  let cmp = null;
-  if (baseline && boosted && extra > 0){
-    const interestSaved = baseline.interestTotal - boosted.interestTotal;
-    const monthsShaved = baseline.months - boosted.months;
-    const i = 0.05/12, n = baseline.months;
-    const fv = extra * ((Math.pow(1+i, n) - 1) / i);
-    const contributed = extra * n;
-    const investGain = fv - contributed;
-    cmp = { interestSaved, monthsShaved, investGain, fv, contributed,
-      payoffNew: addMonths(TODAY, boosted.months), payoffOld: addMonths(TODAY, baseline.months),
-      bal10: balanceAfterMonths(p.mortgageBalance, rate, MORTGAGE_PAYMENT, extra, 120),
-      investWins: investGain > interestSaved };
-  }
+  const investPct = p.investNet != null ? p.investNet : 5;
+  const deductPct = p.deductPct != null ? p.deductPct : 37.56;
+  const cmpRaw = extra > 0 ? overpayVsInvest(p.mortgageBalance, rate, MORTGAGE_PAYMENT, extra, investPct, deductPct) : null;
+  const cmp = cmpRaw ? { ...cmpRaw,
+    payoffNew: addMonths(TODAY, cmpRaw.monthsA), horizon: addMonths(TODAY, cmpRaw.months),
+    bal10: balanceAfterMonths(p.mortgageBalance, rate, MORTGAGE_PAYMENT, extra, 120) } : null;
+  const chFlat = (data.assets || []).find(a => a.category === 'property' && a.owner === 'charlotte') || null;
 
   return (
     <div className="stack">
@@ -3076,7 +3261,7 @@ function PropertyTab({ data, setData, lens = 'sven' }){
             ))}
           </tbody>
         </table>
-        <div className="sub">Standard annuity at {pct1(rate)} — principal portion currently ≈ {fmt0(MORTGAGE_PAYMENT - p.mortgageBalance*rate/100/12)}/mnd.</div>
+        <div className="sub">Standard annuity at {rate.toLocaleString('nl-NL', { maximumFractionDigits:2 })}% · principal portion currently ≈ {fmt0(MORTGAGE_PAYMENT - p.mortgageBalance*rate/100/12)}/mnd.</div>
       </div>
 
       <div className="card">
@@ -3085,36 +3270,45 @@ function PropertyTab({ data, setData, lens = 'sven' }){
           <input type="range" min={0} max={1000} step={50} value={extra}
             onChange={e => setData({ ...data, mortgageOverpayment: parseInt(e.target.value, 10) })}/>
         </label>
+        <div className="row" style={{gap:18, flexWrap:'wrap', marginBottom:12}}>
+          <label className="kv" style={{flex:'0 0 auto', gap:8, alignItems:'center'}}><span className="k">Investing return, net of Box 3</span>
+            <NumInput value={investPct} step={0.5} width={70} suffix="%" onChange={v => setProp({ investNet:v })}/></label>
+          <label className="kv" style={{flex:'0 0 auto', gap:8, alignItems:'center'}}><span className="k">Mortgage interest deduction</span>
+            <NumInput value={deductPct} step={0.01} width={80} suffix="%" onChange={v => setProp({ deductPct:v })}/></label>
+        </div>
         {extra === 0
-          ? <div className="sub">Move the slider to compare overpaying against investing the same amount at a net 5% return (7% gross − 2% Box 3 drag).</div>
+          ? <div className="sub">Move the slider to compare overpaying with investing the same amount. Both options spend the same money every month until your current payoff date.</div>
           : cmp && (
             <React.Fragment>
               <div className="grid2">
-                <div className="card" style={{background:'var(--bg)', borderColor: cmp.investWins ? 'var(--surface2)' : 'var(--green)'}}>
-                  <h3>Option A — overpay {fmt0(extra)}/mnd</h3>
+                <div className="card" style={{background:'var(--bg)', borderColor: cmp.edge > 0 ? 'var(--surface2)' : 'var(--green)'}}>
+                  <h3>Option A · overpay {fmt0(extra)}/mnd</h3>
                   <div className="kv"><span className="k">Years shaved off term</span><span className="v">{(cmp.monthsShaved/12).toFixed(1)} jr</span></div>
-                  <div className="kv"><span className="k">Total interest saved</span><span className="v green">{fmt0(cmp.interestSaved)}</span></div>
+                  <div className="kv"><span className="k">Interest saved, gross</span><span className="v">{fmt0(cmp.interestSavedGross)}</span></div>
+                  <div className="kv"><span className="k">Interest saved after deduction</span><span className="v green">{fmt0(cmp.interestSavedNet)}</span></div>
                   <div className="kv"><span className="k">New payoff date</span><span className="v">{fmtMonthYear(cmp.payoffNew)}</span></div>
                   <div className="kv"><span className="k">Balance in 10 years</span><span className="v">{fmt0(cmp.bal10)}</span></div>
+                  <div className="kv"><span className="k">Then invests {fmt0(MORTGAGE_PAYMENT + extra)}/mnd, pot by {fmtMonthYear(cmp.horizon)}</span><span className="v">{fmt0(cmp.potA)}</span></div>
                 </div>
-                <div className="card" style={{background:'var(--bg)', borderColor: cmp.investWins ? 'var(--green)' : 'var(--surface2)'}}>
-                  <h3>Option B — invest {fmt0(extra)}/mnd at net 5%</h3>
-                  <div className="kv"><span className="k">Horizon</span><span className="v">{(cmp.contributed/extra/12).toFixed(1)} jr (current payoff path)</span></div>
-                  <div className="kv"><span className="k">Portfolio value at payoff date</span><span className="v">{fmt0(cmp.fv)}</span></div>
+                <div className="card" style={{background:'var(--bg)', borderColor: cmp.edge > 0 ? 'var(--green)' : 'var(--surface2)'}}>
+                  <h3>Option B · invest {fmt0(extra)}/mnd at {pct1(investPct)}</h3>
+                  <div className="kv"><span className="k">Horizon</span><span className="v">{(cmp.months/12).toFixed(1)} jr (current payoff path)</span></div>
                   <div className="kv"><span className="k">Total contributed</span><span className="v">{fmt0(cmp.contributed)}</span></div>
-                  <div className="kv"><span className="k">Compounded gain</span><span className="v green">{fmt0(cmp.investGain)}</span></div>
+                  <div className="kv"><span className="k">Extra interest refund, reinvested</span><span className="v">{fmt0(cmp.interestSavedGross * deductPct / 100)}</span></div>
+                  <div className="kv"><span className="k">Pot by {fmtMonthYear(cmp.horizon)}</span><span className="v green">{fmt0(cmp.potB)}</span></div>
                 </div>
               </div>
               <div className="mt" style={{textAlign:'center', fontWeight:800, fontSize:16}}
-                children={cmp.investWins
-                  ? <span className="green">Investing wins by {fmt0(cmp.investGain - cmp.interestSaved)} over {(cmp.contributed/extra/12).toFixed(0)} years</span>
-                  : <span className="green">Overpaying wins by {fmt0(cmp.interestSaved - cmp.investGain)} over {(cmp.contributed/extra/12).toFixed(0)} years</span>} />
+                children={cmp.edge > 0
+                  ? <span className="green">Investing ends {fmt0(cmp.edge)} ahead by {fmtMonthYear(cmp.horizon)}</span>
+                  : <span className="green">Overpaying ends {fmt0(-cmp.edge)} ahead by {fmtMonthYear(cmp.horizon)}</span>} />
+              <div className="sub mt" style={{textAlign:'center'}}>Overpaying earns a guaranteed {cmp.netRate.toLocaleString('nl-NL', { maximumFractionDigits:2 })}% after the deduction. Investing expects {pct1(investPct)} with market risk. Same money out every month in both options, both loans gone at the end.</div>
             </React.Fragment>
           )}
       </div>
 
       <div className="card" style={{borderStyle:'dashed', padding:'12px 16px'}}>
-        <span className="small muted">🇬🇧 Charlotte's London flat (separate GBP asset, rented out at £1,995/month gross rental income). Tracked separately — not included in this model.</span>
+        <span className="small muted">🇬🇧 Charlotte's London flat (separate GBP asset{chFlat && chFlat.rentGBP ? ', rented out at ' + gbpfmt(chFlat.rentGBP) + '/month gross' : ''}). Tracked separately, not included in this model.</span>
       </div>
     </div>
   );
@@ -4345,33 +4539,29 @@ function BrokerImportModal({ data, onClose, onCommit }){
   };
 
   /* DEGIRO: transaction history -> average cost basis (EUR) for the shares still held. */
+  /* Same ledger as the Portfolio tab: fees included, sells release cost pro rata, splits do not
+     dilute the average. */
   const parseDegiroCost = parsed => {
     const get = fieldGetter(parsed[0]);
-    const groups = {};
-    parsed.slice(1).forEach(r => {
+    const tx = [];
+    parsed.slice(1).forEach((r, i) => {
       const name = get(r, ['product','naam','name','productnaam']);
       const isin = get(r, ['isin','symbool/isin','symboolisin']);
       if (!name && !isin) return;
       const sh = signedNum(get(r, ['aantal','quantity','shares','amount']));
       if (!sh) return;                                          // skip cash/dividend/fee rows
-      let eur = parseDutchAmount(get(r, ['waardeeur','waarde','valueeur','value','totaaleur','totaal','total']));
+      let eur = parseDutchAmount(get(r, ['waardeeur','waarde','valueeur','value']));
       eur = isNaN(eur) ? 0 : Math.abs(eur);                     // EUR value of the trade
-      const key = (isin || name).toUpperCase();
-      if (!groups[key]) groups[key] = { name, isin, shares:0, buyShares:0, buyCost:0 };
-      const g = groups[key];
-      g.shares += sh;
-      if (sh > 0){ g.buyShares += sh; g.buyCost += eur; }       // money spent buying
-      if (!g.name && name) g.name = name;
-      if (!g.isin && isin) g.isin = isin;
+      let tot = parseDutchAmount(get(r, ['totaaleur','totaal','total']));
+      if (isNaN(tot)) tot = sh > 0 ? -eur : eur;                // no total column: value, no fees
+      const dRaw = get(r, ['datum','date']);
+      const date = parseINGDate(dRaw) || String(dRaw);
+      const time = get(r, ['tijd','time']) || String(100000 - i);   // exports are newest first
+      tx.push({ date, time, name, isin: (isin || name).toUpperCase(), qty: sh, valueEur: eur, totalEur: tot });
     });
-    return Object.keys(groups).map(k => {
-      const g = groups[k];
-      const shares = Math.round(g.shares * 1e6) / 1e6;
-      const avg = g.buyShares > 0 ? g.buyCost / g.buyShares : 0;     // avg EUR cost / share
-      const cost = Math.round(avg * Math.max(shares, 0) * 100) / 100;
-      return { key:uid(), product:g.name || k, isin:g.isin || '', shares,
-        cost, value:null, lastRate:null, mapTo: matchAsset(g.name, g.isin) || '__new__' };
-    }).filter(r => r.shares > 0.000001);
+    return ledgerFromTx(tx).held.map(p => ({ key:uid(), product:p.name || p.isin, isin:/^[A-Z]{2}[0-9A-Z]{10}$/.test(p.isin) ? p.isin : '',
+      shares: Math.round(p.qty * 1e6) / 1e6, cost: Math.round(p.cost * 100) / 100, value:null, lastRate:null,
+      mapTo: matchAsset(p.name, /^[A-Z]{2}[0-9A-Z]{10}$/.test(p.isin) ? p.isin : '') || '__new__' }));
   };
 
   const onFile = e => {
@@ -5286,8 +5476,12 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   const contribM = (fp.monthlyContribution || 0) + (lens === 'sven' ? 0 : (fp.charlotteContribution || 0));
   const age = currentAge(fp.birthYear);
   const yrsToTarget = Math.max(0, (fp.targetAge || 55) - age);
-  const fiTargetNom = fiTarget * Math.pow(1 + (fp.inflation != null ? fp.inflation : 2.5) / 100, yrsToTarget);
-  const coastToday = fiTarget > 0 ? coastNeededToday(fiTargetNom, yrsToTarget, fp, fp.grossReturn || 7) : 0;
+  const dInfl = fp.inflation != null ? fp.inflation : 2.5, dGross = fp.grossReturn || 7;
+  /* Me: the exact coast target of the FIRE tab (AOW per its toggle). Household views: spend / SWR. */
+  const fiTargetNom = (lens === 'sven' && fp.targetAge)
+    ? simulate(investable, fp, dGross, dInfl).fireAtTarget
+    : fiTarget * Math.pow(1 + dInfl / 100, yrsToTarget);
+  const coastToday = fiTarget > 0 ? coastNeededToday(fiTargetNom, yrsToTarget, fp, dGross, dInfl) : 0;
   const coastPct = coastToday > 0 ? Math.min(100, investable / coastToday * 100) : 0;
   const sparkPts = snaps.slice(-14).map(x => x.liquidNW || 0).filter(v => v > 0);
   const allocRows = ASSET_CATS.map(c => ({ name:c.name, color:c.color, val:sumCat(c.id) })).filter(r => r.val > 0);
@@ -5311,7 +5505,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   return (
     <div className="dash">
       <div className="dash-status">
-        <span>Sven Finance <span style={{opacity:.55}}>// v45</span></span>
+        <span>Sven Finance <span style={{opacity:.55}}>// v47</span></span>
         <span className="dstat">
           <span>Lens {(OWNERS[lens] || 'Ours')}</span>
           <span>{plural(vAssets.length, 'position')}</span>
