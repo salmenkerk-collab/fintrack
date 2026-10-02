@@ -1377,7 +1377,8 @@ function PeopleFireView({ data, setData, lens }){
                  // household pot: two people, so two Box 3 allowances
                  box3Exempt: lens === 'ours' ? (Number(fp.box3Exempt) || 0) * 2 : fp.box3Exempt };
   const sim = simulate(investable, fiFp, fp.grossReturn, fp.inflation);   // sim.fireNumber === fiNumber
-  const pctToFI = fiNumber > 0 ? Math.min(100, investable / fiNumber * 100) : 100;
+  const hasSpend = fiNumber > 0;                      // no spend set and no fixed costs: no target to measure against
+  const pctToFI = hasSpend ? Math.min(100, investable / fiNumber * 100) : 0;
   const chartRows = sim.rows.filter(r => r.year <= sim.targetYear);
   const yearsToT = Math.max(sim.targetYear - sim.startYear, 0);
   const coastToday = coastNeededToday(sim.fireAtTarget, yearsToT, fiFp, fp.grossReturn, fp.inflation);
@@ -1394,12 +1395,14 @@ function PeopleFireView({ data, setData, lens }){
   const retireAge = fp.targetAge;
   const realR = Math.max(0.0001, (fp.grossReturn - fp.inflation) / 100);
   const bridgeYears = Math.max(0, startAge - retireAge);
+  const bridgeFundAt = age => {
+    const by = Math.max(0, startAge - age);
+    return spendGapBridge * (1 - Math.pow(1 + realR, -by)) / realR + (spendGapLate / (fp.swr / 100)) / Math.pow(1 + realR, by);
+  };
   const spendGapBridge = Math.max(0, householdSpend - rentNetY);
   const spendGapLate = Math.max(0, householdSpend - rentNetY - pensionNetY);
-  const annuityPV = spendGapBridge * (1 - Math.pow(1 + realR, -bridgeYears)) / realR;
-  const latePV = (spendGapLate / (fp.swr / 100)) / Math.pow(1 + realR, bridgeYears);
-  const bridgeFund = Math.round(annuityPV + latePV);
-  const hitBridge = sim.rows.find(r => r.real >= bridgeFund);     // bridgeFund is in today's money, so compare real
+  const bridgeFund = Math.round(bridgeFundAt(retireAge));             // today's money, stopping at the chosen age
+  const hitBridge = hasSpend ? sim.rows.find(r => r.real >= bridgeFundAt(r.age)) : null;   // today's money on both sides
   const fireAgeBridge = hitBridge ? hitBridge.age : null;
 
   const setFP = (k,v) => setData({ ...data, fireParams: { ...fp, [k]: v } });
@@ -1450,8 +1453,8 @@ function PeopleFireView({ data, setData, lens }){
           <div>
             {lens !== 'charlotte' && <div className="kv"><span className="k">Sven invests / mo</span><span className="v"><NumInput value={svenContribM} step={50} width={90} onChange={v => setFP('monthlyContribution', v)}/></span></div>}
             {lens !== 'sven' && <div className="kv"><span className="k">Charlotte invests / mo</span><span className="v"><NumInput value={charContribM} step={50} width={90} onChange={v => setFP('charlotteContribution', v)}/></span></div>}
-            <div className="kv"><span className="k">On track to FI by</span><span className="v">{sim.fireAge !== null ? 'age ' + sim.fireAge : '> horizon'}</span></div>
-            <div className="kv"><span className="k">Coast FI by</span><span className="v">{sim.coastAge !== null ? 'age ' + sim.coastAge : '—'}</span></div>
+            <div className="kv"><span className="k">On track to FI by</span><span className="v">{!hasSpend ? 'set spend first' : sim.fireAge !== null ? 'age ' + sim.fireAge : '> horizon'}</span></div>
+            <div className="kv"><span className="k">Coast FI by</span><span className="v">{!hasSpend ? '—' : sim.coastAge !== null ? 'age ' + sim.coastAge : '—'}</span></div>
           </div>
         </div>
         <div className="spread mt" style={{alignItems:'flex-end', flexWrap:'wrap', gap:8}}>
@@ -1492,7 +1495,7 @@ function PeopleFireView({ data, setData, lens }){
             <div>
               <div className="kv"><span className="k">Bridge gap / yr</span><span className="v">{fmt0(spendGapBridge)}</span></div>
               <div className="kv"><span className="k">Bridge fund needed</span><span className="v" style={{fontWeight:800}}>{fmt0(bridgeFund)}</span></div>
-              <div className="kv"><span className="k">Pot reaches it by</span><span className="v">{fireAgeBridge !== null ? 'age ' + fireAgeBridge : '> horizon'}</span></div>
+              <div className="kv"><span className="k">Earliest stop age</span><span className="v">{fireAgeBridge !== null ? 'age ' + fireAgeBridge + ' (bridge ' + fmt0(bridgeFundAt(fireAgeBridge)) + ')' : '> horizon'}</span></div>
               <div className="kv"><span className="k">Rental haircut</span><span className="v"><NumInput value={haircut} step={5} width={62} onChange={v => setFP('rentalHaircut', v)}/> %</span></div>
             </div>
           </div>
@@ -2774,9 +2777,9 @@ function PortfolioTab({ data, setData, lens = 'sven' }){
       {lensMatch('sven', lens) && <PortfolioGrowthCard data={data} setData={setData}/>}
       {lensMatch('sven', lens) && <TimeMachineCard data={data}/>}
       <div className="grid3">
-        <BrokerCard title="DEGIRO" total={sum(degiro)} count={degiro.length} unit="positions"/>
-        <BrokerCard title="Trade Republic" total={sum(tr)} count={tr.length} unit="positions"/>
-        <BrokerCard title={'Crypto (' + Array.from(new Set(crypto.map(a => instName(data, a.institutionId)))).join(' + ') + ')'} total={cryptoTotal} count={coins.size} unit="coins"/>
+        {degiro.length > 0 && <BrokerCard title="DEGIRO" total={sum(degiro)} count={degiro.length} unit="positions"/>}
+        {tr.length > 0 && <BrokerCard title="Trade Republic" total={sum(tr)} count={tr.length} unit="positions"/>}
+        {crypto.length > 0 && <BrokerCard title={'Crypto (' + Array.from(new Set(crypto.map(a => instName(data, a.institutionId)))).join(' + ') + ')'} total={cryptoTotal} count={coins.size} unit="coins"/>}
       </div>
 
       <div className="card">
@@ -5481,7 +5484,8 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   const fiTargetNom = (lens === 'sven' && fp.targetAge)
     ? simulate(investable, fp, dGross, dInfl).fireAtTarget
     : fiTarget * Math.pow(1 + dInfl / 100, yrsToTarget);
-  const coastToday = fiTarget > 0 ? coastNeededToday(fiTargetNom, yrsToTarget, fp, dGross, dInfl) : 0;
+  const coastFp = lens === 'ours' ? { ...fp, box3Exempt: (Number(fp.box3Exempt) || 0) * 2 } : fp;   // same basis as the Ours FIRE view
+  const coastToday = fiTarget > 0 ? coastNeededToday(fiTargetNom, yrsToTarget, coastFp, dGross, dInfl) : 0;
   const coastPct = coastToday > 0 ? Math.min(100, investable / coastToday * 100) : 0;
   const sparkPts = snaps.slice(-14).map(x => x.liquidNW || 0).filter(v => v > 0);
   const allocRows = ASSET_CATS.map(c => ({ name:c.name, color:c.color, val:sumCat(c.id) })).filter(r => r.val > 0);
@@ -5505,7 +5509,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   return (
     <div className="dash">
       <div className="dash-status">
-        <span>Sven Finance <span style={{opacity:.55}}>// v47</span></span>
+        <span>Sven Finance <span style={{opacity:.55}}>// v48</span></span>
         <span className="dstat">
           <span>Lens {(OWNERS[lens] || 'Ours')}</span>
           <span>{plural(vAssets.length, 'position')}</span>
