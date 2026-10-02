@@ -4256,6 +4256,9 @@ function BrokerImportModal({ data, onClose, onCommit }){
   const [mode, setMode] = useState(null);             // 'portfolio' | 'transaction' | 'degirocost'
   const [err, setErr] = useState(null);
   const stockAssets = data.assets.filter(a => a.category === 'stocks');
+  const instId = broker.indexOf('degiro') === 0 ? 'degiro' : 'trade-republic';
+  const pool = stockAssets.filter(a => a.institutionId === instId);   // never touch another broker's holdings
+  const [removeGone, setRemoveGone] = useState(true);
 
   const STOP = ['the','etf','inc','corp','plc','holding','holdings','ord','reg','nv','sa','ag',
     'common','stock','stocks','shares','share','class','co','company','ucits','acc','dist','usd','eur','core'];
@@ -4263,11 +4266,12 @@ function BrokerImportModal({ data, onClose, onCommit }){
   const toks = s => norm(s).split(' ').filter(w => w.length > 2 && STOP.indexOf(w) === -1);
   const matchAsset = (product, isin) => {
     if (isin){
-      const byIsin = stockAssets.find(a => a.isin && a.isin.toUpperCase() === isin.toUpperCase());
+      const byIsin = pool.find(a => a.isin && a.isin.toUpperCase() === isin.toUpperCase());
       if (byIsin) return byIsin.id;
     }
     const pt = toks(product); let best = null, bestScore = 0;
-    stockAssets.forEach(a => {
+    pool.forEach(a => {
+      if (isin && a.isin && a.isin.toUpperCase() !== isin.toUpperCase()) return;   // different security
       const at = toks(a.name);
       const shared = pt.filter(w => at.indexOf(w) !== -1).length;
       const score = shared / Math.max(1, Math.min(pt.length, at.length));
@@ -4292,6 +4296,14 @@ function BrokerImportModal({ data, onClose, onCommit }){
       const qty  = parseDutchAmount(get(r, ['aantal','quantity','amount']));
       const value = parseDutchAmount(get(r, ['waardeineur','waardeineuro','valueineur','value','waarde']));
       if (isNaN(value)) return;
+      if (/^cash\b/i.test(product)){                  // EUR + USD cash lines -> one cash position
+        const c = out.find(x => x.isCash);
+        if (c){ c.value = Math.round((c.value + value) * 100) / 100; return; }
+        const cashAsset = pool.find(a => /^cash/i.test(a.name));
+        out.push({ key:uid(), product:'Cash (DEGIRO)', isin:'', shares:null, value, isCash:true,
+          cost:null, lastRate:null, mapTo: cashAsset ? cashAsset.id : '__new__' });
+        return;
+      }
       out.push({ key:uid(), product, isin:isin || '', shares:isNaN(qty) ? null : qty, value,
         cost:null, lastRate:null, mapTo: matchAsset(product, isin) || '__new__' });
     });
@@ -4385,32 +4397,48 @@ function BrokerImportModal({ data, onClose, onCommit }){
   };
 
   const setMap = (key, v) => setRows(rows.map(r => r.key === key ? { ...r, mapTo:v } : r));
+  const gone = (rows && mode === 'portfolio') ? pool.filter(a => !rows.some(r => r.mapTo === a.id)) : [];
 
   const commit = () => {
     let assets = [...data.assets];
     const institutionId = broker.indexOf('degiro') === 0 ? 'degiro' : 'trade-republic';
     const tag = institutionId === 'trade-republic' ? 'Trade Republic' : 'DEGIRO';
     const setsValue = mode !== 'degirocost';            // cost-only import leaves value alone
-    const setsQty = mode !== 'portfolio';
-    let updated = 0, added = 0;
+    let updated = 0, added = 0, removed = 0;
+    const merged = {};                                  // two rows on one holding add up, never overwrite
     rows.forEach(r => {
-      if (r.mapTo === '__skip__') return;
+      if (r.mapTo === '__skip__' || r.mapTo === '__new__') return;
+      const m = merged[r.mapTo];
+      if (!m){ merged[r.mapTo] = { ...r }; return; }
+      m.value = (m.value || 0) + (r.value || 0);
+      m.cost = (m.cost || 0) + (r.cost || 0) || null;
+      m.shares = (m.shares != null && r.shares != null) ? m.shares + r.shares : null;
+    });
+    const commitRows = rows.filter(r => r.mapTo === '__new__')
+      .concat(Object.keys(merged).map(k => merged[k]));
+    commitRows.forEach(r => {
       const cost = ((mode === 'transaction' || mode === 'degirocost') && r.cost > 0) ? Math.round(r.cost*100)/100 : null;
       if (r.mapTo === '__new__'){
         assets.push({ id:uid(), name:r.product, note:tag,
           value:(setsValue ? r.value : (r.cost || 0)), category:'stocks', institutionId, isin:r.isin || null,
-          quantity:(setsQty ? r.shares : null), costBasis:cost, lastUpdated:ISO(TODAY) });
+          quantity:(r.shares != null ? r.shares : null), costBasis:cost, lastUpdated:ISO(TODAY) });
         added++;
       } else {
         assets = assets.map(a => a.id === r.mapTo
-          ? { ...a, value:(setsValue ? r.value : a.value), isin:(a.isin || r.isin || null),
-              quantity:(setsQty ? r.shares : a.quantity),
+          ? { ...a, value:(setsValue ? r.value : a.value), isin:(r.isin || a.isin || null),
+              quantity:(r.shares != null ? r.shares : a.quantity),
               costBasis:(cost != null ? cost : a.costBasis), lastUpdated:ISO(TODAY) } : a);
         updated++;
       }
     });
+    if (mode === 'portfolio' && removeGone && gone.length){
+      const goneIds = gone.map(a => a.id);
+      assets = assets.filter(a => goneIds.indexOf(a.id) === -1);
+      removed = goneIds.length;
+    }
     onCommit(assets, tag + (mode === 'degirocost' ? ' cost-basis import' : ' import') + ': updated ' + updated +
       ', added ' + added + ' position' + (added === 1 ? '' : 's') +
+      (removed ? ', removed ' + removed + ' sold' : '') +
       (mode === 'transaction' ? ' · values estimated from last trade price'
         : mode === 'degirocost' ? ' · current values left as-is' : '') + '.');
   };
@@ -4492,7 +4520,7 @@ function BrokerImportModal({ data, onClose, onCommit }){
                         <select value={r.mapTo} onChange={e => setMap(r.key, e.target.value)}>
                           <option value="__new__">➕ Add as new position</option>
                           <option value="__skip__">Skip this row</option>
-                          {stockAssets.map(a => <option key={a.id} value={a.id}>{a.name} ({fmt0(a.value)})</option>)}
+                          {pool.map(a => <option key={a.id} value={a.id}>{a.name} ({fmt0(a.value)})</option>)}
                         </select>
                       </td>
                     </tr>
@@ -4500,6 +4528,12 @@ function BrokerImportModal({ data, onClose, onCommit }){
                 </tbody>
               </table>
             </div>
+            {gone.length > 0 && (
+              <label className="row small" style={{gap:8}}>
+                <input type="checkbox" checked={removeGone} onChange={e => setRemoveGone(e.target.checked)}/>
+                <span>Not in this export, remove as sold: <b>{gone.map(a => a.name).join(', ')}</b></span>
+              </label>
+            )}
             <div className="spread" style={{flexWrap:'wrap', gap:10}}>
               <span className="small muted">{nMatch} matched · {nNew} new · {nSkip} skipped</span>
               <span className="row" style={{gap:8}}>
