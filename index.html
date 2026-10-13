@@ -529,7 +529,8 @@ function seedData(){
       grossReturn:7, inflation:2.5,
       box3FictitiousReturn:6.00, box3TaxRate:36, box3Exempt:59357,
       annualWithdrawal:30000, swr:4,
-      aowEnabled:false, aowAge:70, aowAnnualGross:13673, aowBuildPct:100,
+      aowEnabled:true, aowAge:70, aowAnnualGross:14571, aowBuildPct:100,
+      pensionNetPct:85, occPensions: defaultOccPensions(),
       householdSpend:0, rentalHaircut:25,
       pension: { enabled:true, startAge:70, accrualFactor:60,
         sven:      { safeNet:1110, employerNet:2045 },
@@ -624,6 +625,16 @@ function migrate(d){
     if (fpd.pension === undefined) fpd.pension = { enabled:true, startAge:70, accrualFactor:60,
       sven:{ safeNet:1110, employerNet:2045 }, charlotte:{ safeNet:799, employerNet:2996 } };
     if (fpd.pension && d.settings && !d.settings._pensionAge70V1){ fpd.pension.startAge = 70; d.settings._pensionAge70V1 = true; }
+    /* Occupational pensions from mijnpensioenoverzicht (13 Oct 2026). One-time: AOW on, since the FI
+       model is a bridge model, and the stored AOW moves to the July 2026 samenwonend figure incl. holiday
+       pay that the overview shows, only when it still holds the old default. */
+    if (fpd.pensionNetPct === undefined) fpd.pensionNetPct = 85;
+    if (!fpd.occPensions || !Array.isArray(fpd.occPensions.streams)) fpd.occPensions = defaultOccPensions();
+    if (d.settings && !d.settings._pensionStreamsV1){
+      if (fpd.aowAnnualGross === 13673) fpd.aowAnnualGross = 14571;
+      fpd.aowEnabled = true;
+      d.settings._pensionStreamsV1 = true;
+    }
     /* one-time: 2026 Box 3 figures. Overige bezittingen is 6,00% in 2026 (6,17% was the 2023 rate).
        118.714 is the allowance for two fiscal partners together, shared with the partner's own box 3
        assets, so the solo model uses the per-person 59.357. Only the exact old values are touched. */
@@ -1179,6 +1190,57 @@ function box3Drag(p, fp, t, inflPct){
   return fp.box3FictitiousReturn/100 * fp.box3TaxRate/100 * ((p - ex) / p) * 100; // %-points
 }
 
+/* Occupational pensions (mijnpensioenoverzicht.nl, bruto per jaar). An active scheme keeps accruing while
+   you work: what you keep at a stop age is the accrued amount plus a straight-line share of the growth to
+   the "te bereiken" figure, measured from the overview date (asOf) to projAge. Frozen pots stay as they are.
+   Straight-line is a floor: in the new PME system early contributions compound longest. */
+function defaultOccPensions(){
+  return { enabled:true, streams:[
+    { id:'pen-pme', name:'PME pensioenfonds (VMI)', active:true, startAge:68,
+      accruedGross:762, projectedGross:30823, projAge:67.25, asOf:'2026-09-30' },
+    { id:'pen-vervoer', name:'Pensioenfonds Vervoer (oud)', active:false, startAge:68,
+      accruedGross:964, projectedGross:964, projAge:67.25, asOf:'2026-09-30' },
+    { id:'pen-nn', name:'Nationale-Nederlanden (oud, premievrij)', active:false, startAge:68,
+      accruedGross:1572, projectedGross:1572, projAge:67.25, asOf:'2026-06-30' },
+  ]};
+}
+function ageAtISO(birthYear, iso){
+  const b = new Date(birthYear, 10, 16, 12), d = iso ? new Date(iso + 'T12:00:00') : TODAY;
+  return (d - b) / (365.25 * 86400000);
+}
+function occKeptAt(s, stopAge, birthYear){
+  const acc = Number(s.accruedGross) || 0;
+  if (!s.active) return acc;
+  const proj = Math.max(acc, Number(s.projectedGross) || 0);
+  const a0 = ageAtISO(birthYear, s.asOf);
+  const span = (Number(s.projAge) || 67) - a0;
+  if (!(span > 0)) return proj;
+  const share = Math.min(1, Math.max(0, (stopAge - a0) / span));
+  return acc + (proj - acc) * share;
+}
+/* Bruto per year you keep across all occupational pensions if you stop at stopAge. */
+function occGrossAt(fp, stopAge){
+  const op = fp.occPensions || {};
+  if (op.enabled === false) return 0;
+  return (op.streams || []).reduce((s, x) => s + occKeptAt(x, stopAge, fp.birthYear), 0);
+}
+/* Spend is net (it comes out of a box 3 pot), pensions and AOW are taxed in box 1. */
+function pensionNetFactor(fp){ const n = Number(fp.pensionNetPct); return (n > 0 ? n : 85) / 100; }
+/* Same valuation as AOW below, per stream: income after tax / SWR, discounted from its start age. */
+function occCreditAt(fp, retireAge, grossPct, inflPct){
+  const op = fp.occPensions || {};
+  if (op.enabled === false) return 0;
+  const realReturn = Math.max(0.001, (1 + grossPct / 100) / (1 + inflPct / 100) - 1);
+  return (op.streams || []).reduce((s, x) => {
+    const A = occKeptAt(x, retireAge, fp.birthYear) * pensionNetFactor(fp);
+    const gap = Math.max(0, (Number(x.startAge) || 68) - retireAge);
+    return s + (A / (fp.swr/100)) / Math.pow(1 + realReturn, gap);
+  }, 0);
+}
+function pensionCreditAt(fp, retireAge, grossPct, inflPct){
+  return aowCreditAt(fp, retireAge, grossPct, inflPct) + occCreditAt(fp, retireAge, grossPct, inflPct);
+}
+
 /* AOW as capital. From aowAge its income offsets withdrawals, so the pot you need when you stop
    shrinks by the capital that income replaces (A / SWR), discounted from aowAge back to the age you
    ACTUALLY stop, at the real return. Stopping at 49 leaves AOW 21 years away, worth far less than
@@ -1188,7 +1250,7 @@ function aowCreditAt(fp, retireAge, grossPct, inflPct){
   const A = (Number(fp.aowAnnualGross) || 0) * (Number(fp.aowBuildPct) || 0) / 100;
   const gapYears = Math.max(0, (Number(fp.aowAge) || 0) - retireAge);
   const realReturn = Math.max(0.001, (1 + grossPct / 100) / (1 + inflPct / 100) - 1);
-  return (A / (fp.swr/100)) / Math.pow(1 + realReturn, gapYears);
+  return (A * pensionNetFactor(fp) / (fp.swr/100)) / Math.pow(1 + realReturn, gapYears);   // after tax
 }
 
 /* Monthly contribution active at a given age: the base amount, stepped up by the schedule. */
@@ -1205,10 +1267,10 @@ function simulate(startNW, fp, grossPct, inflPct){
   const age0 = currentAge(fp.birthYear);
   const targetYear = startYear + (fp.targetAge - age0);
   const fireFull = fp.annualWithdrawal / (fp.swr/100);       // today's money, portfolio-only
-  // The pot you need depends on WHEN you stop: AOW is valued at that age (aowCreditAt),
+  // The pot you need depends on WHEN you stop: AOW and pensions are valued at that age (pensionCreditAt),
   // so every simulated year gets its own target instead of one number fixed at target age.
-  const needAt = age => Math.max(0, fireFull - aowCreditAt(fp, age, grossPct, inflPct));   // today's money
-  const aowCredit = aowCreditAt(fp, fp.targetAge, grossPct, inflPct);
+  const needAt = age => Math.max(0, fireFull - pensionCreditAt(fp, age, grossPct, inflPct));   // today's money
+  const pensionCredit = pensionCreditAt(fp, fp.targetAge, grossPct, inflPct);
   const fireNumber = needAt(fp.targetAge);                   // today's money, stopping at target age
   const horizon = Math.max(fp.targetAge - age0, 1) + 12;     // sim a bit past target
 
@@ -1248,9 +1310,9 @@ function simulate(startNW, fp, grossPct, inflPct){
     yearsToFire: fireYear !== null ? fireYear - startYear : null,
     coastYear, coastAge: coastYear !== null ? age0 + (coastYear - startYear) : null,
     realAtTarget: atTarget ? atTarget.real : 0,
-    fireAtTarget, targetYear, age0, startYear, fireFull, aowCredit,
+    fireAtTarget, targetYear, age0, startYear, fireFull, pensionCredit,
     targetAtFire: fireAge !== null ? needAt(fireAge) : null,                       // today's money
-    aowCreditAtFire: fireAge !== null ? aowCreditAt(fp, fireAge, grossPct, inflPct) : null,
+    pensionCreditAtFire: fireAge !== null ? pensionCreditAt(fp, fireAge, grossPct, inflPct) : null,
   };
 }
 
@@ -1376,7 +1438,7 @@ function PeopleFireView({ data, setData, lens }){
   const hhSched = lens === 'ours' ? svenSched.map(st => ({ fromAge: st.fromAge, monthly: (Number(st.monthly) || 0) + charContribM }))
                 : lens === 'sven' ? svenSched : [];
   const fiFp = { ...fp, contributionSchedule: hhSched, monthlyContribution: hhContribM,
-                 annualWithdrawal: householdSpend, aowEnabled: false,
+                 annualWithdrawal: householdSpend, aowEnabled: false, occPensions: { ...(fp.occPensions || {}), enabled: false },
                  // household pot: two people, so two Box 3 allowances
                  box3Exempt: lens === 'ours' ? (Number(fp.box3Exempt) || 0) * 2 : fp.box3Exempt };
   const sim = simulate(investable, fiFp, fp.grossReturn, fp.inflation);   // sim.fireNumber === fiNumber
@@ -1393,9 +1455,16 @@ function PeopleFireView({ data, setData, lens }){
   const penOn = pen.enabled !== false;
   const startAge = pen.startAge || 70;
   const factor = (pen.accrualFactor != null ? pen.accrualFactor : 60) / 100;
-  const penPerson = id => { const pp = pen[id] || {}; return ((pp.safeNet || 0) + (pp.employerNet || 0) * factor) * 12; };
-  const pensionNetY = penOn ? people.reduce((s,pp) => s + penPerson(pp[0]), 0) : 0;
   const retireAge = fp.targetAge;
+  /* Sven's pension comes from the Me tab: AOW + PME + old pots kept at the retire age, after tax.
+     Charlotte still uses the rough net inputs below. */
+  const svenFromMe = !!(fp.occPensions && Array.isArray(fp.occPensions.streams));
+  const penPerson = id => {
+    if (id === 'sven' && svenFromMe)
+      return ((Number(fp.aowAnnualGross) || 0) * (Number(fp.aowBuildPct) || 0) / 100 + occGrossAt(fp, retireAge)) * pensionNetFactor(fp);
+    const pp = pen[id] || {}; return ((pp.safeNet || 0) + (pp.employerNet || 0) * factor) * 12;
+  };
+  const pensionNetY = penOn ? people.reduce((s,pp) => s + penPerson(pp[0]), 0) : 0;
   const realR = Math.max(0.0001, (fp.grossReturn - fp.inflation) / 100);
   const bridgeYears = Math.max(0, startAge - retireAge);
   const bridgeFundAt = age => {
@@ -1503,10 +1572,17 @@ function PeopleFireView({ data, setData, lens }){
             </div>
           </div>
           <h4 style={{margin:'14px 0 4px'}}>Pension from age {startAge} · net per month</h4>
-          <div className="sub mb">AOW + locked old pots are safe; the employer figure is the work-to-67 projection scaled by the accrual factor, since retiring early freezes it.</div>
+          <div className="sub mb">AOW + locked old pots are safe; the employer figure is the work-to-67 projection scaled by the accrual factor, since retiring early freezes it. Sven’s figure comes from the Me tab.</div>
           <div className="grid2">
             {[['sven','Sven'],['charlotte','Charlotte']].map(pp => {
               const id = pp[0], pd = pen[id] || {};
+              if (id === 'sven' && svenFromMe) return (
+                <div key={id} style={{marginBottom:8}}>
+                  <div style={{fontWeight:700, marginBottom:4}}>{pp[1]}</div>
+                  <div className="sub">From the Me tab · AOW, PME and old pots kept at age {retireAge}, {fp.pensionNetPct || 85}% after tax</div>
+                  <div className="kv"><span className="k">→ counts as</span><span className="v green">{fmt0(penPerson(id))}/yr</span></div>
+                </div>
+              );
               return (
                 <div key={id} style={{marginBottom:8}}>
                   <div style={{fontWeight:700, marginBottom:4}}>{pp[1]}</div>
@@ -1548,6 +1624,74 @@ function PeopleFireView({ data, setData, lens }){
   );
 }
 
+/* Occupational pensions editor (Me tab). Bruto per jaar, as on mijnpensioenoverzicht.nl. */
+function OccPensionEditor({ data, setData, fp, stopAge }){
+  const op = fp.occPensions || { enabled:true, streams:[] };
+  const streams = op.streams || [];
+  const setOp = next => setData({ ...data, fireParams: { ...fp, occPensions: { ...op, ...next } } });
+  const upd = (i, k, v) => setOp({ streams: streams.map((s, j) => j === i ? { ...s, [k]: v } : s) });
+  const del = i => setOp({ streams: streams.filter((s, j) => j !== i) });
+  const add = () => setOp({ streams: streams.concat([{ id: uid(), name: 'Nieuw pensioen', active: false, startAge: 68,
+    accruedGross: 0, projectedGross: 0, projAge: 67.25, asOf: ISO(TODAY) }]) });
+  const on = op.enabled !== false;
+  const net = pensionNetFactor(fp);
+  const occG = streams.reduce((s, x) => s + occKeptAt(x, stopAge, fp.birthYear), 0);
+  const aowG = fp.aowEnabled ? (Number(fp.aowAnnualGross) || 0) * (Number(fp.aowBuildPct) || 0) / 100 : 0;
+  const totG = (on ? occG : 0) + aowG;
+  const spend = Number(fp.annualWithdrawal) || 0;
+  return (
+    <div className="mt" style={{borderTop:'1px solid var(--surface2)', paddingTop:14}}>
+      <label className="row" style={{gap:10, alignItems:'center', cursor:'pointer'}}>
+        <input type="checkbox" checked={on} onChange={e => setOp({ enabled: e.target.checked })}/>
+        <span className="k" style={{fontWeight:600}}>Include occupational pensions <span className="muted small">· PME via VMI and old employer pots, from mijnpensioenoverzicht.nl</span></span>
+      </label>
+      {on && <React.Fragment>
+        <div className="form-grid" style={{marginTop:12}}>
+          <label className="fld">Net after tax <span className="dim">(AOW + pensions)</span>
+            <NumInput value={fp.pensionNetPct != null ? fp.pensionNetPct : 85} step={1} width={75}
+              onChange={v => setData({ ...data, fireParams: { ...fp, pensionNetPct: v } })} suffix="%"/></label>
+        </div>
+        <div className="stack" style={{gap:10, marginTop:10}}>
+          {streams.map((s, i) => (
+            <div key={s.id || i} className="occ-pen" style={{background:'var(--bg)', borderRadius:8, padding:'10px 12px'}}>
+              <div className="row" style={{gap:8, alignItems:'center', flexWrap:'wrap'}}>
+                <input value={s.name || ''} onChange={e => upd(i, 'name', e.target.value)} style={{flex:'1 1 180px', minWidth:0}}/>
+                <label className="row small" style={{gap:5, alignItems:'center', cursor:'pointer'}}>
+                  <input type="checkbox" checked={!!s.active} onChange={e => upd(i, 'active', e.target.checked)}/> still accruing
+                </label>
+                <button className="btn" style={{padding:'2px 8px'}} onClick={() => del(i)} title="Remove pension">🗑</button>
+              </div>
+              <div className="row" style={{gap:8, alignItems:'center', flexWrap:'wrap', marginTop:8}}>
+                <span className="small muted">Opgebouwd</span>
+                <NumInput value={s.accruedGross || 0} step={100} width={95} onChange={v => upd(i, 'accruedGross', v)} suffix="€/jr"/>
+                {s.active && <React.Fragment>
+                  <span className="small muted">te bereiken</span>
+                  <NumInput value={s.projectedGross || 0} step={100} width={95} onChange={v => upd(i, 'projectedGross', v)} suffix="€/jr"/>
+                  <span className="small muted">working to age</span>
+                  <NumInput value={s.projAge || 67} step={0.25} width={70} onChange={v => upd(i, 'projAge', v)}/>
+                </React.Fragment>}
+                <span className="small muted">pays from age</span>
+                <NumInput value={s.startAge || 68} step={1} width={60} onChange={v => upd(i, 'startAge', v)}/>
+              </div>
+              <div className="sub" style={{marginTop:6}}>Stopping at {stopAge} you keep <b className="num">{fmt0(occKeptAt(s, stopAge, fp.birthYear))}</b>/jr bruto{s.active
+                ? ' · straight-line share of the work-to-' + (s.projAge || 67) + ' projection, counted from ' + (s.asOf || 'the overview date')
+                : ' · frozen'}</div>
+            </div>
+          ))}
+        </div>
+        <div className="row" style={{gap:10, marginTop:10}}>
+          <button className="btn" onClick={add}>+ Add pension</button>
+        </div>
+        <div className="sub" style={{marginTop:8}}>
+          Stopping at {stopAge}: pensions <b className="num">{fmt0(occG)}</b>/jr{aowG > 0 ? ' + AOW ' + fmt0(aowG) + '/jr' : ''} = <b className="num">{fmt0(totG)}</b> bruto,
+          about <b className="num green">{fmt0(totG * net)}</b>/jr after tax once all of it runs{spend > 0 ? ', ' + Math.round(totG * net / spend * 100) + '% of your ' + fmt0(spend) + ' spend' : ''}.
+          Amounts as on the overview, roughly today’s money. Straight-line is a floor, since early contributions compound longest in the new PME system and the promotion raises future accrual.
+        </div>
+      </React.Fragment>}
+    </div>
+  );
+}
+
 function FireTab({ data, setData, lens = 'sven' }){
   if (lens !== 'sven') return <PeopleFireView data={data} setData={setData} lens={lens}/>;
   const fp = data.fireParams;
@@ -1568,11 +1712,15 @@ function FireTab({ data, setData, lens = 'sven' }){
      the charts and the footer. `pure` only answers "could the pot carry spend forever with nothing
      leaned on", which is what the progress bar and its milestones measure. */
   const base = simulate(liquid, fp, fp.grossReturn, fp.inflation);
-  const pure = fp.aowEnabled ? simulate(liquid, { ...fp, aowEnabled: false }, fp.grossReturn, fp.inflation) : base;
+  const occOn = (fp.occPensions || {}).enabled !== false && ((fp.occPensions || {}).streams || []).length > 0;
+  const pensOn = !!fp.aowEnabled || occOn;
+  const pure = pensOn ? simulate(liquid, { ...fp, aowEnabled: false, occPensions: { ...(fp.occPensions || {}), enabled: false } }, fp.grossReturn, fp.inflation) : base;
   const pess = simulate(liquid, fp, 5, 3);
   const opt  = simulate(liquid, fp, 9, 2);
   const needed = monthlyNeeded(liquid, fp);
   const aowOn = !!fp.aowEnabled;
+  const stopAt = base.fireAge !== null ? base.fireAge : fp.targetAge;
+  const credAtStop = base.pensionCreditAtFire !== null ? base.pensionCreditAtFire : base.pensionCredit;
 
   const fiNumber = pure.fireFull;                              // spend × 25, today's money
   const yearsToTarget = Math.max(base.targetYear - base.startYear, 0);
@@ -1618,9 +1766,9 @@ function FireTab({ data, setData, lens = 'sven' }){
           <span className="small dim">{fmt0(fiNumber)}</span>
         </div>
         <Milestones liquid={liquid} target={fiNumber} coast={coastNumberToday}/>
-        <div className="sub mt">The bar measures pure FI, investments carrying your spend forever with nothing leaned on. {aowOn
-          ? 'The coast point and both ages below count AOW from ' + fp.aowAge + ', valued at the age you would actually stop, so the earlier you stop the less it helps.'
-          : 'AOW is switched off below, so the ages assume the pot carries everything.'}</div>
+        <div className="sub mt">The bar measures pure FI, investments carrying your spend forever with nothing leaned on. {pensOn
+          ? 'The coast point and both ages below count your pensions (' + (aowOn ? 'AOW from ' + fp.aowAge : 'AOW off') + (occOn ? ', PME and old pots' : '') + '), valued at the age you would actually stop, so the earlier you stop the less they help.'
+          : 'Pensions are switched off below, so the ages assume the pot carries everything.'}</div>
         <div className="grid2 mt">
           <div className="card" style={{background:'var(--bg)', borderColor: isCoast ? 'var(--green)' : 'var(--surface2)'}}>
             <h3>🪂 Coast FIRE</h3>
@@ -1629,7 +1777,7 @@ function FireTab({ data, setData, lens = 'sven' }){
               : <div className="big num">{base.coastAge !== null ? 'Age ' + base.coastAge : '—'}</div>}
             <div className="sub">{isCoast
               ? 'You could stop investing today and still reach your target by ' + fp.targetAge + ' on growth alone.'
-              : (base.coastYear ? 'On track to coast in ' + base.coastYear + '. After that, growth alone gets you to ' + fp.targetAge + (aowOn ? ' (AOW from ' + fp.aowAge + ' included).' : '.')
+              : (base.coastYear ? 'On track to coast in ' + base.coastYear + '. After that, growth alone gets you to ' + fp.targetAge + (pensOn ? ' (pensions included).' : '.')
                                 : 'Keep investing toward the coast point.')}</div>
             {!isCoast && <div className="sub">{fmt0(Math.max(0, coastNumberToday - liquid))} to go.</div>}
           </div>
@@ -1639,7 +1787,7 @@ function FireTab({ data, setData, lens = 'sven' }){
             <div className="sub">{base.yearsToFire !== null
               ? base.yearsToFire + ' years to go · projected ' + base.fireYear + ' · needs ' + fmt0(base.targetAtFire) + ' in today’s €'
               : 'Not reached within the horizon at the current plan.'}</div>
-            {aowOn && <div className="sub" style={{marginTop:4}}>Pure FI without AOW ({fmt0(fiNumber)}): {pure.fireAge !== null ? 'age ' + pure.fireAge + ' (' + pure.fireYear + ')' : 'beyond the horizon'}</div>}
+            {pensOn && <div className="sub" style={{marginTop:4}}>Pure FI without pensions ({fmt0(fiNumber)}): {pure.fireAge !== null ? 'age ' + pure.fireAge + ' (' + pure.fireYear + ')' : 'beyond the horizon'}</div>}
           </div>
         </div>
       </div>
@@ -1687,8 +1835,10 @@ function FireTab({ data, setData, lens = 'sven' }){
                 <NumInput value={fp.aowBuildPct} step={1} onChange={v => setFP('aowBuildPct', v)} width={80} suffix="%"/></label>
             </div>
           )}
-          {fp.aowEnabled && <div className="sub" style={{marginTop:6}}>Full AOW from July 2026 is € 21.203/jr single and € 14.571/jr per person when living together, both including holiday pay (without it € 19.946 and € 13.673). Opbouw builds 2% for every year you live in NL in the 50 years before AOW age, so set it below 100% if you spent years abroad.</div>}
+          {fp.aowEnabled && <div className="sub" style={{marginTop:6}}>Mijnpensioenoverzicht (13 Oct 2026) shows € 14.571/jr, the samenwonend amount, from 67 and 3 months; 70 is the cautious assumption for your cohort. Full AOW from July 2026 is € 21.203/jr single and € 14.571/jr per person when living together, both including holiday pay (without it € 19.946 and € 13.673). Opbouw builds 2% for every year you live in NL in the 50 years before AOW age, so set it below 100% if you spent years abroad.</div>}
         </div>
+
+        <OccPensionEditor data={data} setData={setData} fp={fp} stopAge={fp.targetAge}/>
 
         <div className="mt" style={{borderTop:'1px solid var(--surface2)', paddingTop:14}}>
           <div className="spread" style={{flexWrap:'wrap', gap:8, marginBottom:6}}>
@@ -1769,11 +1919,11 @@ function FireTab({ data, setData, lens = 'sven' }){
 
       <div className="grid3">
         <div className="card">
-          <h3>Pot needed to stop {aowOn && <span className="dim small">(AOW-reduced)</span>}</h3>
+          <h3>Pot needed to stop {pensOn && <span className="dim small">(pension-reduced)</span>}</h3>
           <div className="metric"><CountUp value={base.targetAtFire !== null ? base.targetAtFire : base.fireNumber} format={fmt0}/></div>
           <div className="sub">In today's money, if you stop at {base.fireAge !== null ? base.fireAge : fp.targetAge} · {fmt0(base.fireNumber)} if you stop at {fp.targetAge}</div>
-          {aowOn && <div className="sub" style={{marginTop:4}}>
-            <span className="muted">{fmt0(base.fireFull)} without AOW</span> · AOW from {fp.aowAge} is worth {fmt0(base.aowCreditAtFire !== null ? base.aowCreditAtFire : base.aowCredit)} at {base.fireAge !== null ? base.fireAge : fp.targetAge}, {fmt0(base.aowCredit)} at {fp.targetAge}</div>}
+          {pensOn && <div className="sub" style={{marginTop:4}}>
+            <span className="muted">{fmt0(base.fireFull)} without pensions</span> · your pensions are worth {fmt0(credAtStop)} if you stop at {stopAt}, {fmt0(base.pensionCredit)} at {fp.targetAge}</div>}
         </div>
         <div className="card">
           <h3>Years remaining</h3>
@@ -1795,9 +1945,9 @@ function FireTab({ data, setData, lens = 'sven' }){
       <div className="card" style={{padding:'10px 16px'}}>
         <span className="small muted">
           Coast FIRE reached at age <b className="num">{base.coastAge !== null ? base.coastAge : '—'}</b>, after that contributions become optional. ·
-          {fp.aowEnabled
-            ? <span> AOW included · {fmt0(fp.aowAnnualGross * fp.aowBuildPct / 100)}/jr from age {fp.aowAge} ({fp.aowBuildPct}% opbouw), lowering the pot you need by {fmt0(base.aowCreditAtFire !== null ? base.aowCreditAtFire : base.aowCredit)} if you stop at {base.fireAge !== null ? base.fireAge : fp.targetAge}.</span>
-            : <span> AOW excluded · toggle it on in Assumptions to fold in the state pension (est. age 70+ for 1997).</span>}
+          {pensOn
+            ? <span> Pensions included · {aowOn ? 'AOW ' + fmt0(fp.aowAnnualGross * fp.aowBuildPct / 100) + '/jr from ' + fp.aowAge : 'AOW off'}{occOn ? ' · PME and old pots ' + fmt0(occGrossAt(fp, stopAt)) + '/jr kept at ' + stopAt : ''} (bruto, {fp.pensionNetPct || 85}% after tax), lowering the pot you need by {fmt0(credAtStop)} if you stop at {stopAt}.</span>
+            : <span> Pensions excluded · toggle AOW and occupational pensions on in Assumptions.</span>}
         </span>
       </div>
     </div>
