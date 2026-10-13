@@ -717,6 +717,20 @@ function migrate(d){
       d.institutions.push({ id:'balmoral', name:'Balmoral Court (London)', type:'other' });
     d.settings._charlotteHousingV1 = true;
   }
+  /* v53. Charlotte's starter profile (her own spend, FI age and birthday) and, once, a take-home estimate
+     from her gross salary when no income is set yet. Marked as an estimate until a payslip replaces it. */
+  if (d.fireParams){
+    const cpx = chProfile(d.fireParams);
+    d.fireParams.charlotteProfile = cpx;
+    if (d.settings && !d.settings._charlotteStartV1){
+      if (!d.income) d.income = {};
+      if (!(Number(d.income.charlotte) > 0)){
+        const e = Math.round(nlNet2026(cpx.grossSalary, cpx.ruling30, cpx.pensionPct).regularM / 10) * 10;
+        d.income.charlotte = e; cpx.estimateSeeded = e;
+      }
+      d.settings._charlotteStartV1 = true;
+    }
+  }
   return d;
 }
 
@@ -1166,10 +1180,12 @@ function NetWorthTab({ data, setData, lens = 'sven' }){
 }
 
 /* ============================ TAB 2 — FIRE ============================ */
-function currentAge(birthYear){
-  // birthday 16 Nov → before that date you are (year − birthYear − 1)
+function currentAge(birthYear, birthMD){
+  // birthday 16 Nov (Sven) unless birthMD 'MM-DD' is given → before that date you are (year − birthYear − 1)
   const y = TODAY.getFullYear();
-  const hadBirthday = (TODAY.getMonth() > 10) || (TODAY.getMonth() === 10 && TODAY.getDate() >= 16);
+  const md = /^\d{2}-\d{2}$/.test(birthMD || '') ? birthMD : '11-16';
+  const bm = parseInt(md.slice(0, 2), 10) - 1, bd = parseInt(md.slice(3), 10);
+  const hadBirthday = (TODAY.getMonth() > bm) || (TODAY.getMonth() === bm && TODAY.getDate() >= bd);
   return y - birthYear - (hadBirthday ? 0 : 1);
 }
 
@@ -1185,6 +1201,82 @@ function isFiAsset(a){
 }
 function investableOf(assets){
   return (assets || []).filter(isFiAsset).reduce((s,a) => s + (a.value || 0), 0);
+}
+
+/* Dutch take-home estimate, 2026 rules for under AOW age (box 1 brackets, algemene heffingskorting,
+   arbeidskorting). gross = annual gross incl. holiday pay. ruling = 30% ruling, pensionPct = own pension
+   contribution (deductible). Rough on purpose, no bijzonder tarief, so a payslip always wins. */
+function nlNet2026(gross, ruling, pensionPct){
+  gross = Math.max(0, Number(gross) || 0);
+  const pens = gross * Math.max(0, Number(pensionPct) || 0) / 100;
+  const taxable = Math.max(0, gross * (ruling ? 0.7 : 1) - pens);
+  const b1 = 38883, b2 = 78426;
+  const raw = Math.min(taxable, b1) * 0.3575 + Math.max(0, Math.min(taxable, b2) - b1) * 0.3756 + Math.max(0, taxable - b2) * 0.495;
+  const ahk = taxable <= 29736 ? 3115 : Math.max(0, 3115 - 0.06398 * (taxable - 29736));
+  const w = taxable;
+  const ak = w < 11965 ? 0.08324 * w : w < 25845 ? 996 + 0.31009 * (w - 11965)
+    : w < 45592 ? 5300 + 0.0195 * (w - 25845) : Math.max(0, 5685 - 0.0651 * (w - 45592));
+  const tax = Math.max(0, raw - ahk - ak);
+  const netY = gross - pens - tax;
+  return { netY, regularM: netY / 12.96, avgM: netY / 12, taxable, tax };
+}
+
+/* Charlotte's starter profile. Her own spend, FI age and birthday, so her lens stops borrowing the
+   household spend and Sven's age. Gross salary is the ~86k Embla figure, an estimate until a payslip. */
+const CH_DEFAULTS = { birthYear:1997, birthMD:'01-04', grossSalary:86000, ruling30:false, pensionPct:0,
+  personalSpendM:700, bufferMonths:4, targetAge:52, flatPurchaseGBP:0, flatPurchaseDate:'', checks:{}, estimateSeeded:0 };
+function chProfile(fp){
+  const c = (fp && fp.charlotteProfile) || {};
+  return { ...CH_DEFAULTS, ...c, checks: { ...(c.checks || {}) } };
+}
+function charlottePlan(data){
+  const fp = data.fireParams || {};
+  const cp = chProfile(fp);
+  const est = nlNet2026(cp.grossSalary, cp.ruling30, cp.pensionPct);
+  const estM = Math.round(est.regularM / 10) * 10;
+  const alt = nlNet2026(cp.grossSalary, !cp.ruling30, cp.pensionPct);
+  const altM = Math.round(alt.regularM / 10) * 10;
+  const incomeSet = Number((data.income || {}).charlotte) || 0;
+  const incomeIsEstimate = !(incomeSet > 0) || (cp.estimateSeeded > 0 && incomeSet === cp.estimateSeeded);
+  const incomeM = incomeSet > 0 ? incomeSet : estM;
+  const hh = data.household || {};
+  const joint = hh.jointContribEach != null ? (Number(hh.jointContribEach) || 0) : 1000;
+  const personal = Math.max(0, Number(cp.personalSpendM) || 0);
+  const spendM = joint + personal;
+  const spendY = spendM * 12;
+  const mine = (data.assets || []).filter(a => a.owner === 'charlotte');
+  const buffer = mine.filter(a => a.category === 'savings').reduce((s,a) => s + (a.value || 0), 0);
+  const investable = investableOf(mine);
+  const hasBroker = mine.some(a => a.category === 'stocks' || a.category === 'crypto');
+  const bufferTarget = Math.round(Math.max(0, Number(cp.bufferMonths) || 0) * spendM);
+  const shortfall = Math.max(0, bufferTarget - buffer);
+  const free = incomeM - spendM;
+  const alloc = Math.max(0, free * 0.9);                       // 10% stays loose for irregular costs
+  const toBuffer = shortfall > 0 ? Math.min(shortfall, Math.floor(alloc * 0.5 / 10) * 10) : 0;
+  const investLater = Math.floor(alloc / 50) * 50;
+  const invest = shortfall > 0 ? Math.max(0, Math.floor((alloc - toBuffer) / 50) * 50) : investLater;
+  const bufferMonthsToGo = toBuffer > 0 ? Math.ceil(shortfall / toBuffer) : (shortfall > 0 ? null : 0);
+  const fx = (data.fx && data.fx.GBP) || 1.17;
+  const haircut = fp.rentalHaircut != null ? fp.rentalHaircut : 25;
+  const flat = mine.find(a => a.category === 'property') || null;
+  let rentSurplusM = 0;
+  if (flat && flat.rentGBP){
+    const mort = (data.liabilities || []).find(l => l.linkedAssetId === flat.id);
+    rentSurplusM = Math.max(0, (flat.rentGBP || 0) - (mort ? (mort.monthlyPayment || 0) : 0))
+      * (flat.currency === 'GBP' ? fx : 1) * (1 - haircut / 100);
+  }
+  const contrib = Number(fp.charlotteContribution) || 0;
+  const auto = {
+    income: incomeSet > 0 && !incomeIsEstimate,
+    buffer: bufferTarget > 0 && buffer >= bufferTarget,
+    invest: contrib > 0 && hasBroker,
+    flat: (Number(cp.flatPurchaseGBP) || 0) > 0 && !!cp.flatPurchaseDate,
+  };
+  const ids = ['income', 'buffer', 'invest', 'pension', 'ni', 'flat', 'box3', 'contract'];
+  const steps = ids.map(id => ({ id, autoDone: !!auto[id], done: !!auto[id] || !!cp.checks[id] }));
+  return { cp, est, estM, altM, incomeSet, incomeIsEstimate, incomeM, joint, personal, spendM, spendY, buffer,
+    investable, hasBroker, bufferTarget, shortfall, free, toBuffer, invest, investLater, bufferMonthsToGo,
+    rentSurplusM, flat, contrib, steps, doneN: steps.filter(x => x.done).length };
 }
 
 /* Grow a pot with no new money, net of Box 3 drag (same rules as simulate).
@@ -1311,7 +1403,7 @@ const __potMemo = new Map();
 function potNeededAt(fp, stopAge, grossPct, inflPct){
   const key = JSON.stringify([fp.annualWithdrawal, fp.housingSpend, fp.housingEndYear, fp.housingSolo, fp.reserveYears,
     fp.swr, fp.aowEnabled, fp.aowAge, fp.aowAnnualGross, fp.aowBuildPct, fp.pensionNetPre, fp.pensionNetPost,
-    fp.pensionNetPct, fp.occPensions, fp.birthYear, fp.box3FictitiousReturn, fp.box3TaxRate, fp.box3Exempt,
+    fp.pensionNetPct, fp.occPensions, fp.birthYear, fp.birthMD, fp.box3FictitiousReturn, fp.box3TaxRate, fp.box3Exempt,
     stopAge, grossPct, inflPct]);
   if (__potMemo.has(key)) return __potMemo.get(key);
   const v = potNeededCalc(fp, stopAge, grossPct, inflPct);
@@ -1322,7 +1414,7 @@ function potNeededAt(fp, stopAge, grossPct, inflPct){
 function potNeededCalc(fp, stopAge, grossPct, inflPct){
   const swr = (Number(fp.swr) > 0 ? Number(fp.swr) : 4) / 100;
   const infl = Number(inflPct) || 0;
-  const ageNow = currentAge(fp.birthYear);
+  const ageNow = currentAge(fp.birthYear, fp.birthMD);
   const streams = pensionStreamsFor(fp, stopAge);
   const hEnd = ((Number(fp.housingSpend) || 0) > 0) ? housingEndAge(fp) : 0;
   const last = Math.max.apply(null, [stopAge, hEnd].concat(streams.map(x => x.startAge)));
@@ -1365,7 +1457,7 @@ function contribAtAge(fp, age){
 /* Simulate one scenario. Returns trajectory rows + key milestones. */
 function simulate(startNW, fp, grossPct, inflPct){
   const startYear = TODAY.getFullYear();
-  const age0 = currentAge(fp.birthYear);
+  const age0 = currentAge(fp.birthYear, fp.birthMD);
   const targetYear = startYear + (fp.targetAge - age0);
   const pureFp = noPensions(fp);
   const pureAt = age => potNeededAt(pureFp, age, grossPct, inflPct);     // nothing leaned on
@@ -1480,7 +1572,131 @@ function Milestones({ liquid, target, coast }){
   );
 }
 
-function PeopleFireView({ data, setData, lens }){
+/* Charlotte's starting point. Her month, a first split between buffer and investing, and eight first steps.
+   Auto steps tick themselves from the data, the rest she ticks by hand. */
+const CH_STEPS = {
+  income:   { t:'Put her real take-home pay in', to:'budget' },
+  buffer:   { t:'Build a cash buffer' },
+  invest:   { t:'Automate a monthly investment' },
+  pension:  { t:'Find all her pensions', links:[['mijnpensioenoverzicht.nl','https://www.mijnpensioenoverzicht.nl'], ['UK Pension Tracing Service','https://www.gov.uk/find-pension-contact-details']] },
+  ni:       { t:'Check her UK National Insurance record', links:[['Check NI record','https://www.gov.uk/check-national-insurance-record'], ['Voluntary contributions','https://www.gov.uk/voluntary-national-insurance-contributions']] },
+  flat:     { t:'Log the flat’s purchase price and date' },
+  box3:     { t:'Declare the flat in Box 3 and claim the relief' },
+  contract: { t:'Put the money arrangements on paper' },
+};
+function CharlotteStart({ data, setData, setTab }){
+  const fp = data.fireParams || {};
+  const p = charlottePlan(data);
+  const cp = p.cp;
+  const total = p.steps.length;
+  const [open, setOpen] = useState(p.doneN < total);
+  const setCP = (k, v) => setData({ ...data, fireParams: { ...fp, charlotteProfile: { ...cp, [k]: v } } });
+  const tick = (id, on) => setData({ ...data, fireParams: { ...fp, charlotteProfile: { ...cp, checks: { ...cp.checks, [id]: on } } } });
+  const apply = () => {
+    const inc = { ...(data.income || {}) };
+    let seeded = cp.estimateSeeded;
+    if (!(Number(inc.charlotte) > 0)){ inc.charlotte = p.estM; seeded = p.estM; }
+    const goals = (data.goals || []).slice();
+    const gi = goals.findIndex(g => g.id === 'goal-ch-buffer');
+    if (p.bufferTarget > 0){
+      const dt = new Date(TODAY.getFullYear(), TODAY.getMonth() + Math.max(1, p.bufferMonthsToGo || 1), 1);
+      const when = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+      if (gi >= 0) goals[gi] = { ...goals[gi], target:p.bufferTarget, monthly:p.toBuffer, targetDate:when };
+      else goals.push({ id:'goal-ch-buffer', name:'Charlotte cash buffer', icon:'🛟', target:p.bufferTarget,
+        targetDate:when, saved:p.buffer, monthly:p.toBuffer, owner:'charlotte' });
+    }
+    setData({ ...data, income: inc, goals,
+      fireParams: { ...fp, charlotteContribution: p.invest, charlotteProfile: { ...cp, estimateSeeded: seeded, planApplied: ISO(TODAY),
+        investAfterBuffer: p.shortfall > 0 ? p.investLater : 0 } } });
+  };
+  const why = id => {
+    if (id === 'income') return 'Now ' + fmt0(p.incomeM) + ' a month' + (p.incomeIsEstimate ? ', an estimate from ' + fmt0(cp.grossSalary) + ' gross.' : ' from her payslip.') + ' Use the net amount on her first full Embla payslip.';
+    if (id === 'buffer') return cp.bufferMonths + ' months of her costs, ' + fmt0(p.bufferTarget) + '. A new job plus a let flat are two things that can surprise her. Keep it in an instant access savings account and add it in Net Worth as her savings.';
+    if (id === 'invest') return 'One low cost, broad world index fund on a monthly plan, so it happens without thinking. Set the amount with the button above, then add the account in Net Worth so the model follows it.';
+    if (id === 'pension') return 'Her BeFrank pension at Embla shows on mijnpensioenoverzicht.nl (DigiD). Old UK workplace pots can be traced online. Then update her pension figures in the Ours view.';
+    if (id === 'ni') return 'Each extra qualifying year adds about £358 a year to her UK State Pension for life. The cheap Class 2 route for people abroad ended in April 2026, but years before that may still be filled under the old rules, so check soon.';
+    if (id === 'flat') return 'Needed for UK capital gains tax if she sells, and for the joint Move plan.';
+    if (id === 'box3') return 'As a Dutch resident her London flat counts in Box 3. The Netherlands gives a relief for foreign property, but only when it is claimed in her tax return.';
+    return 'Her share of the joint account pays half of the mortgage on Sven’s flat, and flat sale money may go into it too. A notarial samenlevingscontract protects her share and, at the same address, makes them fiscal partners who can share Box 3 allowances.';
+  };
+  const leftover = p.free;
+  return (
+    <div className="card" style={{border:'1px solid var(--gold)'}}>
+      <div className="spread" style={{cursor:'pointer', userSelect:'none'}} onClick={() => setOpen(o => !o)}>
+        <h2 style={{margin:0}}>🧭 Start here · Charlotte</h2>
+        <span className="row" style={{gap:10}}><span className="num small">{p.doneN} of {total} done</span><span className="dim">{open ? '▲' : '▼'}</span></span>
+      </div>
+      <div style={{position:'relative', height:8, background:'var(--bg)', borderRadius:6, marginTop:10}}>
+        <div className="growbar" style={{position:'absolute', left:0, top:0, height:'100%', width:(p.doneN / total * 100) + '%', background:'var(--green)', borderRadius:6, transition:'width .4s'}}/>
+      </div>
+      {open && <React.Fragment>
+        <div className="sub mt">A first plan built from what we already know. Every number can be changed, and anything marked estimate gets replaced once she has the real figure. Her numbers stay in her own view and never touch Sven’s.</div>
+        <div className="grid2 mt">
+          <div>
+            <h4 style={{margin:'0 0 6px'}}>Her basics</h4>
+            <div className="kv"><span className="k">Gross salary / yr <span className="dim small">incl. holiday pay</span></span><span className="v"><NumInput value={cp.grossSalary} step={500} width={100} onChange={v => setCP('grossSalary', v)}/></span></div>
+            <div className="kv"><label className="k" style={{cursor:'pointer'}}><input type="checkbox" checked={!!cp.ruling30} onChange={e => setCP('ruling30', e.target.checked)}/> 30% ruling applies</label><span className="v dim small">{cp.ruling30 ? 'on' : 'off'}</span></div>
+            <div className="kv"><span className="k">Own pension contribution</span><span className="v"><NumInput value={cp.pensionPct} step={0.5} width={70} onChange={v => setCP('pensionPct', v)} suffix="%"/></span></div>
+            <div className="kv"><span className="k">Personal spending / mo <span className="dim small">outside the joint account</span></span><span className="v"><NumInput value={cp.personalSpendM} step={50} width={90} onChange={v => setCP('personalSpendM', v)}/></span></div>
+            <div className="kv"><span className="k">Cash buffer</span><span className="v"><NumInput value={cp.bufferMonths} step={1} width={56} onChange={v => setCP('bufferMonths', v)} suffix="months"/></span></div>
+            <div className="kv"><span className="k">FI age goal</span><span className="v"><NumInput value={cp.targetAge} step={1} width={56} onChange={v => setCP('targetAge', v)}/></span></div>
+            <div className="sub mt">{cp.ruling30
+              ? 'The 30% ruling only applies if Embla recruited her from abroad. If it started in 2024 or later it drops to 27% from January 2027. Without it her take-home would be about ' + fmt0(p.altM) + ' a month.'
+              : 'With the 30% ruling her take-home would be about ' + fmt0(p.altM) + ' a month. It only applies if Embla recruited her from abroad, so it is worth asking HR.'}</div>
+          </div>
+          <div>
+            <h4 style={{margin:'0 0 6px'}}>Her month</h4>
+            <div className="kv"><span className="k">Take-home {p.incomeIsEstimate && <span className="small" style={{color:'var(--gold)'}}>estimate</span>}</span><span className="v">{fmt0(p.incomeM)}</span></div>
+            <div className="kv"><span className="k">Joint account</span><span className="v">−{fmt0(p.joint)}</span></div>
+            <div className="kv"><span className="k">Personal spending</span><span className="v">−{fmt0(p.personal)}</span></div>
+            <div className="kv" style={{borderTop:'1px solid var(--surface2)', paddingTop:6}}><span className="k" style={{fontWeight:700}}>Left over</span><span className={'v ' + (leftover >= 0 ? 'green' : 'red')} style={{fontWeight:800}}>{fmt0(leftover)}</span></div>
+            {p.shortfall > 0 && <div className="kv"><span className="k">To the buffer</span><span className="v">{fmt0(p.toBuffer)}{p.bufferMonthsToGo ? ' · ' + p.bufferMonthsToGo + ' mo' : ''}</span></div>}
+            <div className="kv"><span className="k">To investing</span><span className="v green" style={{fontWeight:800}}>{fmt0(p.invest)}</span></div>
+            {p.shortfall > 0 && <div className="kv"><span className="k dim">Once the buffer is full</span><span className="v dim">{fmt0(p.investLater)}</span></div>}
+            {p.rentSurplusM > 0 && <div className="kv"><span className="k dim">Rent surplus while let <span className="small">not in the plan</span></span><span className="v dim">≈ {fmt0(p.rentSurplusM)}</span></div>}
+            <div className="sub">10% of what is left over stays loose for irregular costs. The rent surplus is kept out because the flat may be sold.</div>
+            <div className="row mt" style={{gap:8, flexWrap:'wrap'}}>
+              <button className="btn btn-green" onClick={apply} disabled={!(p.invest > 0) && !(p.toBuffer > 0)}>Use this plan</button>
+              {p.contrib > 0 && <span className="small dim">In the model now {fmt0(p.contrib)}/mo{p.contrib !== p.invest ? ', the plan says ' + fmt0(p.invest) + ', tap to update' : ''}{p.shortfall > 0 && cp.investAfterBuffer > p.contrib ? ', rising to ' + fmt0(cp.investAfterBuffer) + ' next year' : ''}</span>}
+            </div>
+          </div>
+        </div>
+        <h4 style={{margin:'16px 0 4px'}}>First steps</h4>
+        {p.steps.map((st, i) => {
+          const meta = CH_STEPS[st.id] || {};
+          const title = st.id === 'buffer' ? 'Build a cash buffer of ' + fmt0(p.bufferTarget) : meta.t;
+          return (
+            <div key={st.id} className="row" style={{alignItems:'flex-start', gap:10, padding:'9px 0', borderTop:'1px solid var(--surface2)'}}>
+              <input type="checkbox" checked={st.done} disabled={st.autoDone} onChange={e => tick(st.id, e.target.checked)}
+                title={st.autoDone ? 'Ticked automatically from her data' : 'Tick when done'} style={{marginTop:3}}/>
+              <div style={{flex:1, minWidth:0}}>
+                <div style={{fontWeight:600, opacity: st.done ? .55 : 1, textDecoration: st.done ? 'line-through' : 'none'}}>
+                  {i + 1}. {title}{st.autoDone && <span className="small dim" style={{marginLeft:6, textDecoration:'none'}}>auto</span>}</div>
+                <div className="sub">{why(st.id)}</div>
+                {st.id === 'buffer' && p.bufferTarget > 0 &&
+                  <div style={{position:'relative', height:6, background:'var(--bg)', borderRadius:4, marginTop:6, maxWidth:280}}>
+                    <div style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100, p.buffer / p.bufferTarget * 100) + '%', background:'var(--gold)', borderRadius:4}}/>
+                  </div>}
+                {st.id === 'flat' &&
+                  <div className="row mt" style={{gap:10, flexWrap:'wrap'}}>
+                    <label className="small">Bought for £ <NumInput value={cp.flatPurchaseGBP} step={1000} width={100} onChange={v => setCP('flatPurchaseGBP', v)}/></label>
+                    <label className="small">on <input type="date" value={cp.flatPurchaseDate || ''} onChange={e => setCP('flatPurchaseDate', e.target.value)}/></label>
+                  </div>}
+                {meta.links &&
+                  <div className="row" style={{gap:12, flexWrap:'wrap', marginTop:4}}>
+                    {meta.links.map(l => <a key={l[1]} className="small" href={l[1]} target="_blank" rel="noopener noreferrer">{l[0]} ↗</a>)}
+                  </div>}
+                {meta.to && setTab && <button className="btn" style={{marginTop:6, padding:'3px 10px', fontSize:12}} onClick={() => setTab(meta.to)}>Open Budget</button>}
+              </div>
+            </div>
+          );
+        })}
+      </React.Fragment>}
+    </div>
+  );
+}
+
+function PeopleFireView({ data, setData, lens, setTab }){
   const [showRE, setShowRE] = useState(false);
   const fp = data.fireParams;
   const fxRate = (data.fx && data.fx.GBP) || 1.17;
@@ -1527,8 +1743,9 @@ function PeopleFireView({ data, setData, lens }){
   // household annual spend: derived from your fixed costs unless you set a figure.
   // fixed costs exclude discretionary spending, so the derived figure is a conservative floor.
   const budgetFixedAnnual = Math.round((data.fixedCosts || []).reduce((s,c) => s + monthlyEq(c), 0) * 12);
-  const householdSpend = (fp.householdSpend && fp.householdSpend > 0) ? fp.householdSpend : budgetFixedAnnual;
-  const spendIsDerived = !(fp.householdSpend && fp.householdSpend > 0);
+  const chPlan = lens === 'charlotte' ? charlottePlan(data) : null;   // Charlotte: her own spend, not the household's
+  const householdSpend = chPlan ? chPlan.spendY : ((fp.householdSpend && fp.householdSpend > 0) ? fp.householdSpend : budgetFixedAnnual);
+  const spendIsDerived = !chPlan && !(fp.householdSpend && fp.householdSpend > 0);
 
   // FI-FIRST: the headline is a clean, self-funded target — annual spend / SWR (the 4% rule).
   // Nothing leaned on. Pensions + rental only matter for RE timing, in the collapsed section below.
@@ -1541,10 +1758,13 @@ function PeopleFireView({ data, setData, lens }){
 
   const svenSched = Array.isArray(fp.contributionSchedule) ? fp.contributionSchedule : [];
   const hhSched = lens === 'ours' ? svenSched.map(st => ({ fromAge: st.fromAge, monthly: (Number(st.monthly) || 0) + charContribM }))
-                : lens === 'sven' ? svenSched : [];
+                : lens === 'sven' ? svenSched
+                : (chPlan && chPlan.shortfall > 0 && (Number(chPlan.cp.investAfterBuffer) || 0) > charContribM)   // buffer phase, then the full amount
+                  ? [{ fromAge: currentAge(chPlan.cp.birthYear, chPlan.cp.birthMD) + 1, monthly: Number(chPlan.cp.investAfterBuffer) }] : [];
   const fiFp = { ...fp, contributionSchedule: hhSched, monthlyContribution: hhContribM,
                  annualWithdrawal: householdSpend, aowEnabled: false, occPensions: { ...(fp.occPensions || {}), enabled: false },
                  housingSpend: 0, reserveYears: 0,
+                 ...(chPlan ? { targetAge: chPlan.cp.targetAge, birthYear: chPlan.cp.birthYear, birthMD: chPlan.cp.birthMD } : {}),
                  // household pot: two people, so two Box 3 allowances
                  box3Exempt: lens === 'ours' ? (Number(fp.box3Exempt) || 0) * 2 : fp.box3Exempt };
   const sim = simulate(investable, fiFp, fp.grossReturn, fp.inflation);   // sim.fireNumber === fiNumber
@@ -1592,6 +1812,7 @@ function PeopleFireView({ data, setData, lens }){
 
   return (
     <div className="stack">
+      {lens === 'charlotte' && <CharlotteStart data={data} setData={setData} setTab={setTab}/>}
       <div className="card">
         <h3>{lens === 'ours' ? 'Who holds what' : (OWNERS[lens] || 'Charlotte') + '\u2019s wealth'}</h3>
         <div className="sub mb">Property shown as equity (value minus its mortgage). {lens === 'ours' ? 'Charlotte leans into stones, Sven into stocks.' : ''}</div>
@@ -1625,8 +1846,11 @@ function PeopleFireView({ data, setData, lens }){
         <div className="sub mb">Your investable pot against a clean FI number: annual spend × {xMult} (the {fp.swr}% rule). Nothing leaned on — just “could our investments carry us, full stop.” Pensions and rent are an RE timing bonus, tucked below.</div>
         <div className="grid2">
           <div>
-            <div className="kv"><span className="k">Household spend / yr</span>
-              <span className="v"><NumInput value={householdSpend} step={500} width={110} onChange={v => setFP('householdSpend', v)}/></span></div>
+            {chPlan
+              ? <div className="kv"><span className="k">Her spend / yr <span className="dim small">joint {fmt0(chPlan.joint)} + personal {fmt0(chPlan.personal)} a month</span></span><span className="v">{fmt0(householdSpend)}</span></div>
+              : <div className="kv"><span className="k">Household spend / yr</span>
+              <span className="v"><NumInput value={householdSpend} step={500} width={110} onChange={v => setFP('householdSpend', v)}/></span></div>}
+            {chPlan && <div className="kv"><span className="k">FI age goal</span><span className="v">{chPlan.cp.targetAge}</span></div>}
             <div className="kv"><span className="k">FI number (spend × {xMult})</span><span className="v" style={{fontWeight:800}}>{fmt0(fiNumber)}</span></div>
             <div className="kv"><span className="k">Investable pot</span><span className="v">{fmt0(investable)}</span></div>
             {investRate !== null && <div className="kv"><span className="k">Investing rate</span><span className="v">{pct1(investRate)}</span></div>}
@@ -1809,8 +2033,8 @@ function OccPensionEditor({ data, setData, fp, stopAge }){
   );
 }
 
-function FireTab({ data, setData, lens = 'sven' }){
-  if (lens !== 'sven') return <PeopleFireView data={data} setData={setData} lens={lens}/>;
+function FireTab({ data, setData, lens = 'sven', setTab }){
+  if (lens !== 'sven') return <PeopleFireView data={data} setData={setData} lens={lens} setTab={setTab}/>;
   const fp = data.fireParams;
   const liquid = investableOf(data.assets.filter(a => lensMatch(a.owner, lens)));   // FI pot: savings pots excluded unless ticked
 
@@ -2292,7 +2516,9 @@ function BudgetTab({ data, setData, lens = 'sven' }){
               </tr>}
             {(lens === 'charlotte' || lens === 'ours') &&
               <tr>
-                <td style={{fontWeight:600}}>Charlotte net income <div className="muted small">Just started — provisional until a few payslips land</div></td>
+                <td style={{fontWeight:600}}>Charlotte net income <div className="muted small">{(income.charlotte || 0) > 0 && (income.charlotte || 0) === chProfile(data.fireParams).estimateSeeded
+                  ? 'Estimate from her gross salary (2026 rules). Replace with her first full payslip'
+                  : 'Just started — provisional until a few payslips land'}</div></td>
                 <td className="r"><NumInput value={income.charlotte || 0} step={10} onChange={v => setIncome('charlotte', v)}/></td>
               </tr>}
             <tr>
@@ -5691,7 +5917,9 @@ function DashboardTab({ data, lens = 'sven', setTab }){
 
   /* FI target on the same basis as the FIRE tab: spend / SWR, nothing leaned on */
   const fcAnnual = (data.fixedCosts || []).reduce((s,c) => s + monthlyEq(c), 0) * 12;
+  const chPlanD = lens === 'charlotte' ? charlottePlan(data) : null;
   const spend = lens === 'sven' ? (fp.annualWithdrawal || 0)
+    : chPlanD ? chPlanD.spendY
     : (fp.householdSpend > 0 ? fp.householdSpend : fcAnnual);
   const swr = fp.swr || 4;
   const fiTarget = spend > 0
@@ -5746,11 +5974,13 @@ function DashboardTab({ data, lens = 'sven', setTab }){
                                      : 'GBP rate is ' + fxDays + ' days old — tap ↻ Live rate', to:'networth', go:'Net Worth' });
   if (!lastSnap || lastSnap.date.slice(0,7) !== mk)
     nudges.push({ t:'No net-worth snapshot for this month yet', to:'history', go:'History' });
-  if (lens !== 'sven' && !(fp.householdSpend > 0))
+  if (chPlanD && chPlanD.doneN < chPlanD.steps.length)
+    nudges.unshift({ t:'Start here · ' + chPlanD.doneN + ' of ' + chPlanD.steps.length + ' first steps done', to:'fire', go:'FIRE' });
+  if (lens === 'ours' && !(fp.householdSpend > 0))
     nudges.push({ t:'Household spend is guessed from fixed costs — set the real figure', to:'fire', go:'FIRE' });
-  if (lens !== 'sven' && !(fp.charlotteContribution > 0))
+  if (lens === 'ours' && !(fp.charlotteContribution > 0))
     nudges.push({ t:'Charlotte invests €0/mo in the projection', to:'fire', go:'FIRE' });
-  if (lens !== 'sven' && !(income.charlotte > 0))
+  if (lens === 'ours' && !(income.charlotte > 0))
     nudges.push({ t:'Charlotte’s income is still €0', to:'budget', go:'Budget' });
   if (!ptx.length)
     nudges.push({ t:'Import DEGIRO Transactions.csv for the growth chart', to:'portfolio', go:'Portfolio' });
@@ -5769,8 +5999,8 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   const dateLine = TODAY.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
   const contribM = lens === 'charlotte' ? (fp.charlotteContribution || 0)
     : (fp.monthlyContribution || 0) + (lens === 'sven' ? 0 : (fp.charlotteContribution || 0));
-  const age = currentAge(fp.birthYear);
-  const yrsToTarget = Math.max(0, (fp.targetAge || 55) - age);
+  const age = chPlanD ? currentAge(chPlanD.cp.birthYear, chPlanD.cp.birthMD) : currentAge(fp.birthYear);
+  const yrsToTarget = Math.max(0, ((chPlanD ? chPlanD.cp.targetAge : fp.targetAge) || 55) - age);
   const dInfl = fp.inflation != null ? fp.inflation : 2.5, dGross = fp.grossReturn || 7;
   /* Me: the exact coast target of the FIRE tab (AOW per its toggle). Household views: spend / SWR. */
   const fiTargetNom = (lens === 'sven' && fp.targetAge)
@@ -5801,7 +6031,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   return (
     <div className="dash">
       <div className="dash-status">
-        <span>Sven Finance <span style={{opacity:.55}}>// v49</span></span>
+        <span>Sven Finance <span style={{opacity:.55}}>// v53</span></span>
         <span className="dstat">
           <span>Lens {(OWNERS[lens] || 'Ours')}</span>
           <span>{plural(vAssets.length, 'position')}</span>
@@ -6021,7 +6251,7 @@ function FinanceModel(){
       <main key={tab}>
         {tab === 'dash'     && <DashboardTab data={data} lens={lens} setTab={setTab}/>}
         {tab === 'networth' && <NetWorthTab data={data} setData={setData} lens={lens}/>}
-        {tab === 'fire'     && <FireTab data={data} setData={setData} lens={lens}/>}
+        {tab === 'fire'     && <FireTab data={data} setData={setData} lens={lens} setTab={setTab}/>}
         {tab === 'budget'   && <BudgetTab data={data} setData={setData} lens={lens}/>}
         {tab === 'goals'    && <GoalsTab data={data} setData={setData} lens={lens}/>}
         {tab === 'portfolio'&& <PortfolioTab data={data} setData={setData} lens={lens}/>}
