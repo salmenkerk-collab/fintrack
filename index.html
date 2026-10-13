@@ -635,6 +635,25 @@ function migrate(d){
       fpd.aowEnabled = true;
       d.settings._pensionStreamsV1 = true;
     }
+    /* v52. Real spend from the Jul to Sep 2026 bank exports. The 30.000 default was never set by hand, so it
+       becomes core spend 25.200 (after the DUO loan is gone) plus his half of the €1.055/mnd mortgage,
+       a fixed nominal 6.330/yr until Dec 2054. Net % splits before / after AOW age; old pots are not
+       inflation-proof; a 5-year reserve when the pensions start. */
+    if (fpd.housingSpend === undefined) fpd.housingSpend = 0;
+    if (fpd.housingEndYear === undefined) fpd.housingEndYear = 2054;
+    if (fpd.housingSolo === undefined) fpd.housingSolo = false;
+    if (fpd.reserveYears === undefined) fpd.reserveYears = 5;
+    if (fpd.pensionNetPre === undefined) fpd.pensionNetPre = 78;
+    if (fpd.pensionNetPost === undefined) fpd.pensionNetPost = 87;
+    if (fpd.rentInBridge === undefined) fpd.rentInBridge = false;
+    if (fpd.occPensions && fpd.occPensions.haircutPct === undefined) fpd.occPensions.haircutPct = 0;
+    if (fpd.occPensions && Array.isArray(fpd.occPensions.streams))
+      fpd.occPensions.streams.forEach(x => { if (x.indexed === undefined)
+        x.indexed = x.id === 'pen-pme' ? true : (x.id === 'pen-vervoer' || x.id === 'pen-nn') ? false : !!x.active; });
+    if (d.settings && !d.settings._spendV52){
+      if (fpd.annualWithdrawal === 30000){ fpd.annualWithdrawal = 25200; fpd.housingSpend = 6330; }
+      d.settings._spendV52 = true;
+    }
     /* one-time: 2026 Box 3 figures. Overige bezittingen is 6,00% in 2026 (6,17% was the 2023 rate).
        118.714 is the allowance for two fiscal partners together, shared with the partner's own box 3
        assets, so the solo model uses the per-person 59.357. Only the exact old values are touched. */
@@ -676,6 +695,13 @@ function migrate(d){
   // keep EUR value of foreign-currency assets in sync with the stored rate
   (d.assets || []).forEach(a => { if (a.currency === 'GBP') a.value = (a.fxAmount || 0) * (d.fx.GBP || 1.17); });
   (d.liabilities || []).forEach(l => { if (!l.currency) l.currency = 'EUR'; if (l.currency === 'GBP') l.value = (l.fxAmount || 0) * (d.fx.GBP || 1.17); });
+  // one-time: the DUO student loan (Mijn DUO, 1 Oct 2026). A loan, so it is not netted against property equity.
+  if (d.settings && !d.settings._duoV1){
+    if (Array.isArray(d.liabilities) && !d.liabilities.some(l => /duo|studie/i.test(l.name || '')))
+      d.liabilities.push({ id:'liab-duo', name:'Studieschuld DUO', value:7756.71, owner:'sven', currency:'EUR', kind:'loan',
+        monthlyPayment:120, interestRate:2.33, note:'SF35 · €120/mnd · 2,33% vast t/m 2030 · stand 1 okt 2026', lastUpdated: ISO(TODAY) });
+    d.settings._duoV1 = true;
+  }
   // one-time: give Charlotte her own London flat (GBP, rented) and remove any stray ownership of Orchislaan
   if (d.settings && !d.settings._charlotteHousingV1){
     if (Array.isArray(d.assets) && !d.assets.some(a => /balmoral/i.test(a.name || ''))){
@@ -773,7 +799,7 @@ function NetWorthTab({ data, setData, lens = 'sven' }){
   const debt = vLiabs.reduce((s,l) => s + l.value, 0);
   const netWorth = gross - debt;
   const liquid = sumCat('stocks') + sumCat('crypto') + sumCat('savings');
-  const propEquity = sumCat('property') - debt;
+  const propEquity = sumCat('property') - vLiabs.filter(isPropDebt).reduce((s,l) => s + l.value, 0);
   const savingsRate = data.income.sven > 0 ? data.fireParams.monthlyContribution / data.income.sven * 100 : 0;
 
   const donutData = ASSET_CATS.map(c => ({ name:c.name, value:sumCat(c.id), fill:c.color }))
@@ -1150,6 +1176,8 @@ function currentAge(birthYear){
 /* FI eligibility. Property never counts. Savings pots (emergency, travel, tyres) are
    earmarked money, so they are opt-in. Stocks and crypto are opt-out.
    Per-asset override: a.fiEligible = true / false (Net Worth tab, edit row). */
+/* A student loan or other personal loan is debt, but not debt on a property. */
+function isPropDebt(l){ return !l || l.kind !== 'loan'; }
 function isFiAsset(a){
   if (!a || a.category === 'property') return false;
   if (a.fiEligible === true || a.fiEligible === false) return a.fiEligible;
@@ -1225,32 +1253,105 @@ function occGrossAt(fp, stopAge){
   return (op.streams || []).reduce((s, x) => s + occKeptAt(x, stopAge, fp.birthYear), 0);
 }
 /* Spend is net (it comes out of a box 3 pot), pensions and AOW are taxed in box 1. */
-function pensionNetFactor(fp){ const n = Number(fp.pensionNetPct); return (n > 0 ? n : 85) / 100; }
-/* Same valuation as AOW below, per stream: income after tax / SWR, discounted from its start age. */
-function occCreditAt(fp, retireAge, grossPct, inflPct){
+function pensionNetFactor(fp){
+  const n = Number(fp.pensionNetPost != null ? fp.pensionNetPost : fp.pensionNetPct);
+  return (n > 0 ? n : 87) / 100;
+}
+/* Before AOW age a pension is taxed at the full box 1 rate (no AOW-age bracket, no ouderenkorting). */
+function pensionNetPreFactor(fp){ const n = Number(fp.pensionNetPre); return (n > 0 ? n : 78) / 100; }
+/* Same plan with every pension switched off: "could the pot carry everything on its own". */
+function noPensions(fp){ return { ...fp, aowEnabled: false, occPensions: { ...(fp.occPensions || {}), enabled: false } }; }
+/* Model ages run October to October (birthday 16 Nov), so the year you are `age` is birthYear + age + 1.
+   The mortgage is paid through housingEndYear, so the first age without it is housingEndYear - birthYear. */
+function housingEndAge(fp){ return (Number(fp.housingEndYear) || 0) - (Number(fp.birthYear) || 0); }
+/* Spend in today's money in the year you are `age`. Core spend is real. The mortgage share is a fixed
+   nominal payment, so in today's money it shrinks with inflation, and it stops when the mortgage ends.
+   housingSolo is the stress case where Sven pays the whole payment alone. */
+function spendAt(fp, age, ageNow, inflPct){
+  const core = Number(fp.annualWithdrawal) || 0;
+  const h = (Number(fp.housingSpend) || 0) * (fp.housingSolo ? 2 : 1);
+  if (!(h > 0) || age >= housingEndAge(fp)) return core;
+  return core + h / Math.pow(1 + (Number(inflPct) || 0) / 100, Math.max(0, age - ageNow));
+}
+/* Pension streams (bruto per year) as kept when you stop at stopAge. AOW only when switched on. The
+   haircut stresses the occupational pensions (conditional indexation, Wtp scenario risk). */
+function pensionStreamsFor(fp, stopAge){
+  const out = [];
+  if (fp.aowEnabled)
+    out.push({ startAge: Number(fp.aowAge) || 70, indexed: true,
+               gross: (Number(fp.aowAnnualGross) || 0) * (Number(fp.aowBuildPct) || 0) / 100 });
   const op = fp.occPensions || {};
-  if (op.enabled === false) return 0;
-  const realReturn = Math.max(0.001, (1 + grossPct / 100) / (1 + inflPct / 100) - 1);
-  return (op.streams || []).reduce((s, x) => {
-    const A = occKeptAt(x, retireAge, fp.birthYear) * pensionNetFactor(fp);
-    const gap = Math.max(0, (Number(x.startAge) || 68) - retireAge);
-    return s + (A / (fp.swr/100)) / Math.pow(1 + realReturn, gap);
+  if (op.enabled !== false){
+    const keep = 1 - Math.min(100, Math.max(0, Number(op.haircutPct) || 0)) / 100;
+    (op.streams || []).forEach(x => out.push({ startAge: Number(x.startAge) || 68, indexed: x.indexed !== false,
+      gross: occKeptAt(x, stopAge, fp.birthYear) * keep }));
+  }
+  return out.filter(x => x.gross > 0);
+}
+/* Pension income after tax, in today's money, in the year you are `age`. A pot that is not
+   inflation-proof keeps its nominal amount, so it loses value from today onward. */
+function pensionNetAt(fp, streams, age, ageNow, inflPct){
+  const net = age < (Number(fp.aowAge) || 70) ? pensionNetPreFactor(fp) : pensionNetFactor(fp);
+  const f = 1 + (Number(inflPct) || 0) / 100;
+  return streams.reduce((t, x) => {
+    if (age < x.startAge) return t;
+    return t + (x.indexed ? x.gross : x.gross / Math.pow(f, Math.max(0, age - ageNow))) * net;
   }, 0);
 }
-function pensionCreditAt(fp, retireAge, grossPct, inflPct){
-  return aowCreditAt(fp, retireAge, grossPct, inflPct) + occCreditAt(fp, retireAge, grossPct, inflPct);
-}
 
-/* AOW as capital. From aowAge its income offsets withdrawals, so the pot you need when you stop
-   shrinks by the capital that income replaces (A / SWR), discounted from aowAge back to the age you
-   ACTUALLY stop, at the real return. Stopping at 49 leaves AOW 21 years away, worth far less than
-   at 60. */
-function aowCreditAt(fp, retireAge, grossPct, inflPct){
-  if (!fp.aowEnabled) return 0;
-  const A = (Number(fp.aowAnnualGross) || 0) * (Number(fp.aowBuildPct) || 0) / 100;
-  const gapYears = Math.max(0, (Number(fp.aowAge) || 0) - retireAge);
-  const realReturn = Math.max(0.001, (1 + grossPct / 100) / (1 + inflPct / 100) - 1);
-  return (A * pensionNetFactor(fp) / (fp.swr/100)) / Math.pow(1 + realReturn, gapYears);   // after tax
+/* Bridge model: the smallest pot (today's money) that lets you stop at stopAge.
+   From the stop age the pot pays the full spend until each pension starts, then only the shortfall.
+   At the last start age (or when the mortgage ends, if later) it must still hold the remaining shortfall
+   capitalised at the SWR, plus a reserve of reserveYears x core spend because from then on everything
+   leans on pensions (longevity, Wtp cuts, spending shocks). Only when pensions are part of the plan.
+   The bridge is simulated year by year: withdrawal at the start of the year, then growth at the real
+   return capped at the SWR (sequence-risk margin) minus Box 3 drag on what is left. Bisection on the
+   starting pot, like coastNeededToday. Memoised, because simulate asks for every age. */
+const __potMemo = new Map();
+function potNeededAt(fp, stopAge, grossPct, inflPct){
+  const key = JSON.stringify([fp.annualWithdrawal, fp.housingSpend, fp.housingEndYear, fp.housingSolo, fp.reserveYears,
+    fp.swr, fp.aowEnabled, fp.aowAge, fp.aowAnnualGross, fp.aowBuildPct, fp.pensionNetPre, fp.pensionNetPost,
+    fp.pensionNetPct, fp.occPensions, fp.birthYear, fp.box3FictitiousReturn, fp.box3TaxRate, fp.box3Exempt,
+    stopAge, grossPct, inflPct]);
+  if (__potMemo.has(key)) return __potMemo.get(key);
+  const v = potNeededCalc(fp, stopAge, grossPct, inflPct);
+  if (__potMemo.size > 20000) __potMemo.clear();
+  __potMemo.set(key, v);
+  return v;
+}
+function potNeededCalc(fp, stopAge, grossPct, inflPct){
+  const swr = (Number(fp.swr) > 0 ? Number(fp.swr) : 4) / 100;
+  const infl = Number(inflPct) || 0;
+  const ageNow = currentAge(fp.birthYear);
+  const streams = pensionStreamsFor(fp, stopAge);
+  const hEnd = ((Number(fp.housingSpend) || 0) > 0) ? housingEndAge(fp) : 0;
+  const last = Math.max.apply(null, [stopAge, hEnd].concat(streams.map(x => x.startAge)));
+  const shortfall = a => Math.max(0, spendAt(fp, a, ageNow, infl) - pensionNetAt(fp, streams, a, ageNow, infl));
+  const reserve = streams.length ? Math.max(0, Number(fp.reserveYears) || 0) * (Number(fp.annualWithdrawal) || 0) : 0;
+  /* Two parts. The lasting part covers the shortfall that never goes away (after the last pension starts)
+     at the SWR, held from the stop age on, exactly as without any bridge. The bridge part pays everything
+     above that until the last start age and still holds the reserve at the end; it grows at the real return
+     capped at the SWR, minus the Box 3 drag of the whole pot. So stopping after every pension has started,
+     or with no pensions and no mortgage, gives plain shortfall / SWR. */
+  const lastingDraw = shortfall(last);
+  const lasting = lastingDraw / swr;
+  if (last <= stopAge) return lasting + reserve;
+  const draws = [];
+  for (let a = stopAge; a < last; a++) draws.push(Math.max(0, shortfall(a) - lastingDraw));
+  const grossCap = Math.min(Number(grossPct) || 0, ((1 + swr) * (1 + infl / 100) - 1) * 100);
+  const survives = B => {
+    let p = B;
+    for (let i = 0; i < draws.length; i++){
+      p -= draws[i];
+      if (p < 0) return false;
+      p *= (1 + (grossCap - box3Drag(p + lasting, fp, 0, infl)) / 100) / (1 + infl / 100);
+    }
+    return p >= reserve;
+  };
+  let lo = 0, hi = reserve + draws.reduce((t, x) => t + x, 0) + 1;
+  for (let k = 0; k < 30 && !survives(hi); k++) hi *= 2;
+  for (let k = 0; k < 50; k++){ const mid = (lo + hi) / 2; if (survives(mid)) hi = mid; else lo = mid; }
+  return lasting + hi;
 }
 
 /* Monthly contribution active at a given age: the base amount, stepped up by the schedule. */
@@ -1266,11 +1367,13 @@ function simulate(startNW, fp, grossPct, inflPct){
   const startYear = TODAY.getFullYear();
   const age0 = currentAge(fp.birthYear);
   const targetYear = startYear + (fp.targetAge - age0);
-  const fireFull = fp.annualWithdrawal / (fp.swr/100);       // today's money, portfolio-only
-  // The pot you need depends on WHEN you stop: AOW and pensions are valued at that age (pensionCreditAt),
+  const pureFp = noPensions(fp);
+  const pureAt = age => potNeededAt(pureFp, age, grossPct, inflPct);     // nothing leaned on
+  const fireFull = pureAt(fp.targetAge);                     // today's money, portfolio-only, stopping at target age
+  // The pot you need depends on WHEN you stop: bridge to each pension from that age (potNeededAt),
   // so every simulated year gets its own target instead of one number fixed at target age.
-  const needAt = age => Math.max(0, fireFull - pensionCreditAt(fp, age, grossPct, inflPct));   // today's money
-  const pensionCredit = pensionCreditAt(fp, fp.targetAge, grossPct, inflPct);
+  const needAt = age => Math.max(0, potNeededAt(fp, age, grossPct, inflPct));   // today's money, bridge model
+  const pensionCredit = fireFull - needAt(fp.targetAge);                       // how much the pensions save you
   const fireNumber = needAt(fp.targetAge);                   // today's money, stopping at target age
   const horizon = Math.max(fp.targetAge - age0, 1) + 12;     // sim a bit past target
 
@@ -1312,7 +1415,8 @@ function simulate(startNW, fp, grossPct, inflPct){
     realAtTarget: atTarget ? atTarget.real : 0,
     fireAtTarget, targetYear, age0, startYear, fireFull, pensionCredit,
     targetAtFire: fireAge !== null ? needAt(fireAge) : null,                       // today's money
-    pensionCreditAtFire: fireAge !== null ? pensionCreditAt(fp, fireAge, grossPct, inflPct) : null,
+    pensionCreditAtFire: fireAge !== null ? pureAt(fireAge) - needAt(fireAge) : null,
+    fireFullAtFire: fireAge !== null ? pureAt(fireAge) : null,
   };
 }
 
@@ -1392,7 +1496,7 @@ function PeopleFireView({ data, setData, lens }){
   const breakdownFor = id => {
     const sum = cat => A.filter(a => owns(a, id) && a.category === cat).reduce((s,a) => s + a.value, 0);
     const propVal = sum('property');
-    const propDebt = L.filter(l => owns(l, id)).reduce((s,l) => s + l.value, 0);
+    const propDebt = L.filter(l => owns(l, id) && isPropDebt(l)).reduce((s,l) => s + l.value, 0);
     return { stocks:sum('stocks'), crypto:sum('crypto'), savings:sum('savings'), property: Math.max(0, propVal - propDebt) };
   };
   const people = lens === 'ours' ? [['sven','Sven'],['charlotte','Charlotte']] : [[lens, OWNERS[lens] || 'Charlotte']];
@@ -1403,9 +1507,10 @@ function PeopleFireView({ data, setData, lens }){
   const liquid = A.filter(a => a.category !== 'property').reduce((s,a) => s + a.value, 0);
   const investable = investableOf(A);   // FI input: savings pots excluded unless ticked
   const propVal = A.filter(a => a.category === 'property').reduce((s,a) => s + a.value, 0);
-  const debt = L.reduce((s,l) => s + l.value, 0);
+  const debt = L.filter(isPropDebt).reduce((s,l) => s + l.value, 0);
+  const loanDebt = L.filter(l => !isPropDebt(l)).reduce((s,l) => s + l.value, 0);
   const propEquity = Math.max(0, propVal - debt);
-  const netWorth = liquid + propEquity;
+  const netWorth = liquid + propEquity - loanDebt;
 
   // net rental income (rent minus the property's own mortgage), annualised in EUR, then a costs/tax/vacancy haircut
   let rentGrossY = 0, rentRawNetY = 0;
@@ -1417,7 +1522,7 @@ function PeopleFireView({ data, setData, lens }){
     rentRawNetY += Math.max(0, (a.rentGBP || 0) - pay) * 12 * r;
   });
   const haircut = fp.rentalHaircut != null ? fp.rentalHaircut : 25;        // tax, maintenance, vacancy, agent fees
-  const rentNetY = rentRawNetY * (1 - haircut / 100);
+  const rentNetY = fp.rentInBridge ? rentRawNetY * (1 - haircut / 100) : 0;   // off by default: the flat may be sold
 
   // household annual spend: derived from your fixed costs unless you set a figure.
   // fixed costs exclude discretionary spending, so the derived figure is a conservative floor.
@@ -1439,6 +1544,7 @@ function PeopleFireView({ data, setData, lens }){
                 : lens === 'sven' ? svenSched : [];
   const fiFp = { ...fp, contributionSchedule: hhSched, monthlyContribution: hhContribM,
                  annualWithdrawal: householdSpend, aowEnabled: false, occPensions: { ...(fp.occPensions || {}), enabled: false },
+                 housingSpend: 0, reserveYears: 0,
                  // household pot: two people, so two Box 3 allowances
                  box3Exempt: lens === 'ours' ? (Number(fp.box3Exempt) || 0) * 2 : fp.box3Exempt };
   const sim = simulate(investable, fiFp, fp.grossReturn, fp.inflation);   // sim.fireNumber === fiNumber
@@ -1459,17 +1565,20 @@ function PeopleFireView({ data, setData, lens }){
   /* Sven's pension comes from the Me tab: AOW + PME + old pots kept at the retire age, after tax.
      Charlotte still uses the rough net inputs below. */
   const svenFromMe = !!(fp.occPensions && Array.isArray(fp.occPensions.streams));
-  const penPerson = id => {
-    if (id === 'sven' && svenFromMe)
-      return ((Number(fp.aowAnnualGross) || 0) * (Number(fp.aowBuildPct) || 0) / 100 + occGrossAt(fp, retireAge)) * pensionNetFactor(fp);
+  const penPerson = (id, age) => {
+    const a = age != null ? age : retireAge;
+    if (id === 'sven' && svenFromMe)   // same streams as the Me tab, kept at that stop age, AOW only when on
+      return pensionStreamsFor(fp, a).reduce((t, x) => t + x.gross, 0) * pensionNetFactor(fp);
     const pp = pen[id] || {}; return ((pp.safeNet || 0) + (pp.employerNet || 0) * factor) * 12;
   };
-  const pensionNetY = penOn ? people.reduce((s,pp) => s + penPerson(pp[0]), 0) : 0;
-  const realR = Math.max(0.0001, (fp.grossReturn - fp.inflation) / 100);
+  const penNetAt = age => penOn ? people.reduce((s,pp) => s + penPerson(pp[0], age), 0) : 0;
+  const pensionNetY = penNetAt(retireAge);
+  const realR = Math.min(Math.max(0.0001, (fp.grossReturn - fp.inflation) / 100), (fp.swr || 4) / 100);   // never above the SWR
   const bridgeYears = Math.max(0, startAge - retireAge);
   const bridgeFundAt = age => {
     const by = Math.max(0, startAge - age);
-    return spendGapBridge * (1 - Math.pow(1 + realR, -by)) / realR + (spendGapLate / (fp.swr / 100)) / Math.pow(1 + realR, by);
+    const late = Math.max(0, householdSpend - rentNetY - penNetAt(age));
+    return spendGapBridge * (1 - Math.pow(1 + realR, -by)) / realR + (late / (fp.swr / 100)) / Math.pow(1 + realR, by);
   };
   const spendGapBridge = Math.max(0, householdSpend - rentNetY);
   const spendGapLate = Math.max(0, householdSpend - rentNetY - pensionNetY);
@@ -1561,7 +1670,7 @@ function PeopleFireView({ data, setData, lens }){
             <div>
               <div className="kv"><span className="k">Retire age</span><span className="v"><NumInput value={fp.targetAge} step={1} width={56} onChange={v => setFP('targetAge', v)}/></span></div>
               <div className="kv"><span className="k">Bridge length</span><span className="v">{bridgeYears} yrs ({retireAge}→{startAge})</span></div>
-              <div className="kv"><span className="k">Net rental (if flat kept)</span><span className="v green">{fmt0(rentNetY)}/yr</span></div>
+              <div className="kv"><label className="k" style={{cursor:'pointer'}}><input type="checkbox" checked={!!fp.rentInBridge} onChange={e => setFP('rentInBridge', e.target.checked)}/> Count London rent (only if the flat is kept)</label><span className="v green">{fmt0(rentRawNetY * (1 - haircut / 100))}/yr</span></div>
               <div className="kv"><span className="k">Pensions from {startAge}</span><span className="v green">{fmt0(pensionNetY)}/yr</span></div>
             </div>
             <div>
@@ -1579,13 +1688,13 @@ function PeopleFireView({ data, setData, lens }){
               if (id === 'sven' && svenFromMe) return (
                 <div key={id} style={{marginBottom:8}}>
                   <div style={{fontWeight:700, marginBottom:4}}>{pp[1]}</div>
-                  <div className="sub">From the Me tab · AOW, PME and old pots kept at age {retireAge}, {fp.pensionNetPct || 85}% after tax</div>
+                  <div className="sub">From the Me tab · AOW, PME and old pots kept at age {retireAge}, {fp.pensionNetPost != null ? fp.pensionNetPost : 87}% after tax</div>
                   <div className="kv"><span className="k">→ counts as</span><span className="v green">{fmt0(penPerson(id))}/yr</span></div>
                 </div>
               );
               return (
                 <div key={id} style={{marginBottom:8}}>
-                  <div style={{fontWeight:700, marginBottom:4}}>{pp[1]}</div>
+                  <div style={{fontWeight:700, marginBottom:4}}>{pp[1]} <span className="dim small">· rough, unverified</span></div>
                   <div className="kv"><span className="k">AOW + locked</span><span className="v"><NumInput value={pd.safeNet || 0} step={25} width={90} onChange={v => setPen(id,'safeNet',v)} suffix="/mnd"/></span></div>
                   <div className="kv"><span className="k">Current employer</span><span className="v"><NumInput value={pd.employerNet || 0} step={50} width={90} onChange={v => setPen(id,'employerNet',v)} suffix="/mnd"/></span></div>
                   <div className="kv"><span className="k">→ counts as</span><span className="v green">{fmt0(penPerson(id))}/yr</span></div>
@@ -1631,11 +1740,11 @@ function OccPensionEditor({ data, setData, fp, stopAge }){
   const setOp = next => setData({ ...data, fireParams: { ...fp, occPensions: { ...op, ...next } } });
   const upd = (i, k, v) => setOp({ streams: streams.map((s, j) => j === i ? { ...s, [k]: v } : s) });
   const del = i => setOp({ streams: streams.filter((s, j) => j !== i) });
-  const add = () => setOp({ streams: streams.concat([{ id: uid(), name: 'Nieuw pensioen', active: false, startAge: 68,
+  const add = () => setOp({ streams: streams.concat([{ id: uid(), name: 'Nieuw pensioen', active: false, indexed: false, startAge: 68,
     accruedGross: 0, projectedGross: 0, projAge: 67.25, asOf: ISO(TODAY) }]) });
   const on = op.enabled !== false;
   const net = pensionNetFactor(fp);
-  const occG = streams.reduce((s, x) => s + occKeptAt(x, stopAge, fp.birthYear), 0);
+  const occG = streams.reduce((s, x) => s + occKeptAt(x, stopAge, fp.birthYear), 0) * (1 - Math.min(100, Math.max(0, Number(op.haircutPct) || 0)) / 100);
   const aowG = fp.aowEnabled ? (Number(fp.aowAnnualGross) || 0) * (Number(fp.aowBuildPct) || 0) / 100 : 0;
   const totG = (on ? occG : 0) + aowG;
   const spend = Number(fp.annualWithdrawal) || 0;
@@ -1647,9 +1756,14 @@ function OccPensionEditor({ data, setData, fp, stopAge }){
       </label>
       {on && <React.Fragment>
         <div className="form-grid" style={{marginTop:12}}>
-          <label className="fld">Net after tax <span className="dim">(AOW + pensions)</span>
-            <NumInput value={fp.pensionNetPct != null ? fp.pensionNetPct : 85} step={1} width={75}
-              onChange={v => setData({ ...data, fireParams: { ...fp, pensionNetPct: v } })} suffix="%"/></label>
+          <label className="fld">Net after tax before AOW age
+            <NumInput value={fp.pensionNetPre != null ? fp.pensionNetPre : 78} step={1} width={75}
+              onChange={v => setData({ ...data, fireParams: { ...fp, pensionNetPre: v } })} suffix="%"/></label>
+          <label className="fld">Net after tax from AOW age
+            <NumInput value={fp.pensionNetPost != null ? fp.pensionNetPost : 87} step={1} width={75}
+              onChange={v => setData({ ...data, fireParams: { ...fp, pensionNetPost: v } })} suffix="%"/></label>
+          <label className="fld">Stress · cut occupational pensions by
+            <NumInput value={op.haircutPct || 0} step={5} width={70} onChange={v => setOp({ haircutPct: v })} suffix="%"/></label>
         </div>
         <div className="stack" style={{gap:10, marginTop:10}}>
           {streams.map((s, i) => (
@@ -1658,6 +1772,9 @@ function OccPensionEditor({ data, setData, fp, stopAge }){
                 <input value={s.name || ''} onChange={e => upd(i, 'name', e.target.value)} style={{flex:'1 1 180px', minWidth:0}}/>
                 <label className="row small" style={{gap:5, alignItems:'center', cursor:'pointer'}}>
                   <input type="checkbox" checked={!!s.active} onChange={e => upd(i, 'active', e.target.checked)}/> still accruing
+                </label>
+                <label className="row small" style={{gap:5, alignItems:'center', cursor:'pointer'}} title="Unticked: the amount stays fixed in euros, so inflation eats it">
+                  <input type="checkbox" checked={s.indexed !== false} onChange={e => upd(i, 'indexed', e.target.checked)}/> inflation-proof
                 </label>
                 <button className="btn" style={{padding:'2px 8px'}} onClick={() => del(i)} title="Remove pension">🗑</button>
               </div>
@@ -1675,7 +1792,7 @@ function OccPensionEditor({ data, setData, fp, stopAge }){
               </div>
               <div className="sub" style={{marginTop:6}}>Stopping at {stopAge} you keep <b className="num">{fmt0(occKeptAt(s, stopAge, fp.birthYear))}</b>/jr bruto{s.active
                 ? ' · straight-line share of the work-to-' + (s.projAge || 67) + ' projection, counted from ' + (s.asOf || 'the overview date')
-                : ' · frozen'}</div>
+                : ' · frozen'}{s.indexed === false ? ', not inflation-proof (worth about ' + fmt0(occKeptAt(s, stopAge, fp.birthYear) / Math.pow(1 + (fp.inflation || 0) / 100, Math.max(0, (Number(s.startAge) || 68) - currentAge(fp.birthYear)))) + ' in today’s € when it starts)' : ''}</div>
             </div>
           ))}
         </div>
@@ -1684,7 +1801,7 @@ function OccPensionEditor({ data, setData, fp, stopAge }){
         </div>
         <div className="sub" style={{marginTop:8}}>
           Stopping at {stopAge}: pensions <b className="num">{fmt0(occG)}</b>/jr{aowG > 0 ? ' + AOW ' + fmt0(aowG) + '/jr' : ''} = <b className="num">{fmt0(totG)}</b> bruto,
-          about <b className="num green">{fmt0(totG * net)}</b>/jr after tax once all of it runs{spend > 0 ? ', ' + Math.round(totG * net / spend * 100) + '% of your ' + fmt0(spend) + ' spend' : ''}.
+          about <b className="num green">{fmt0(totG * net)}</b>/jr after tax once all of it runs{spend > 0 ? ', ' + Math.round(totG * net / spend * 100) + '% of your ' + fmt0(spend) + ' core spend' : ''}.
           Amounts as on the overview, roughly today’s money. Straight-line is a floor, since early contributions compound longest in the new PME system and the promotion raises future accrual.
         </div>
       </React.Fragment>}
@@ -1714,7 +1831,7 @@ function FireTab({ data, setData, lens = 'sven' }){
   const base = simulate(liquid, fp, fp.grossReturn, fp.inflation);
   const occOn = (fp.occPensions || {}).enabled !== false && ((fp.occPensions || {}).streams || []).length > 0;
   const pensOn = !!fp.aowEnabled || occOn;
-  const pure = pensOn ? simulate(liquid, { ...fp, aowEnabled: false, occPensions: { ...(fp.occPensions || {}), enabled: false } }, fp.grossReturn, fp.inflation) : base;
+  const pure = pensOn ? simulate(liquid, noPensions(fp), fp.grossReturn, fp.inflation) : base;
   const pess = simulate(liquid, fp, 5, 3);
   const opt  = simulate(liquid, fp, 9, 2);
   const needed = monthlyNeeded(liquid, fp);
@@ -1722,7 +1839,7 @@ function FireTab({ data, setData, lens = 'sven' }){
   const stopAt = base.fireAge !== null ? base.fireAge : fp.targetAge;
   const credAtStop = base.pensionCreditAtFire !== null ? base.pensionCreditAtFire : base.pensionCredit;
 
-  const fiNumber = pure.fireFull;                              // spend × 25, today's money
+  const fiNumber = pure.fireFull;                              // nothing leaned on, stopping at target age, today's money
   const yearsToTarget = Math.max(base.targetYear - base.startYear, 0);
   const coastNumberToday = coastNeededToday(base.fireAtTarget, yearsToTarget, fp, fp.grossReturn, fp.inflation);
   const pctToFI = fiNumber > 0 ? liquid / fiNumber * 100 : 0;
@@ -1751,7 +1868,7 @@ function FireTab({ data, setData, lens = 'sven' }){
         <div className="spread" style={{alignItems:'flex-end', flexWrap:'wrap', gap:8}}>
           <div>
             <div className="metric green" style={{marginBottom:0}}><CountUp value={pctToFI} format={pct1}/></div>
-            <div className="sub">of your {fmt0(fiNumber)} FI number · spend × {Math.round(1/(fp.swr/100))}, investments only</div>
+            <div className="sub">of your {fmt0(fiNumber)} FI number · core spend × {Math.round(1/(fp.swr/100))}{(fp.housingSpend || 0) > 0 ? ' plus your mortgage share until ' + fp.housingEndYear : ''}, stopping at {fp.targetAge}, investments only</div>
           </div>
           <div className="num muted">{fmt0(liquid)} / {fmt0(fiNumber)}</div>
         </div>
@@ -1776,7 +1893,7 @@ function FireTab({ data, setData, lens = 'sven' }){
               ? <div className="big green">Reached ✓</div>
               : <div className="big num">{base.coastAge !== null ? 'Age ' + base.coastAge : '—'}</div>}
             <div className="sub">{isCoast
-              ? 'You could stop investing today and still reach your target by ' + fp.targetAge + ' on growth alone.'
+              ? 'You could stop investing today and still reach your target by ' + fp.targetAge + ' on growth alone, as long as you keep working until then.'
               : (base.coastYear ? 'On track to coast in ' + base.coastYear + '. After that, growth alone gets you to ' + fp.targetAge + (pensOn ? ' (pensions included).' : '.')
                                 : 'Keep investing toward the coast point.')}</div>
             {!isCoast && <div className="sub">{fmt0(Math.max(0, coastNumberToday - liquid))} to go.</div>}
@@ -1813,11 +1930,22 @@ function FireTab({ data, setData, lens = 'sven' }){
             <NumInput value={fp.box3TaxRate} step={1} onChange={v => setFP('box3TaxRate', v)} width={75} suffix="%"/></label>
           <label className="fld">Box 3 exempt threshold
             <NumInput value={fp.box3Exempt} step={1000} onChange={v => setFP('box3Exempt', v)} width={100} suffix="€"/></label>
-          <label className="fld">Annual withdrawal (today's €)
-            <NumInput value={fp.annualWithdrawal} step={1000} onChange={v => setFP('annualWithdrawal', v)} width={100} suffix="€/jr"/></label>
+          <label className="fld">Core spend after FI <span className="dim">(today’s €, without mortgage)</span>
+            <NumInput value={fp.annualWithdrawal} step={500} onChange={v => setFP('annualWithdrawal', v)} width={100} suffix="€/jr"/></label>
           <label className="fld">Safe withdrawal rate
             <NumInput value={fp.swr} step={0.1} onChange={v => setFP('swr', v)} width={75} suffix="%"/></label>
+          <label className="fld">Your mortgage share <span className="dim">(fixed payment)</span>
+            <NumInput value={fp.housingSpend || 0} step={100} onChange={v => setFP('housingSpend', v)} width={100} suffix="€/jr"/></label>
+          <label className="fld">Mortgage paid until
+            <NumInput value={fp.housingEndYear || 2054} step={1} onChange={v => setFP('housingEndYear', v)} width={80}/></label>
+          <label className="fld">Reserve when pensions start
+            <NumInput value={fp.reserveYears != null ? fp.reserveYears : 5} step={1} onChange={v => setFP('reserveYears', v)} width={70} suffix="yrs of core spend"/></label>
         </div>
+        <label className="row" style={{gap:10, alignItems:'center', cursor:'pointer', marginTop:10}}>
+          <input type="checkbox" checked={!!fp.housingSolo} onChange={e => setFP('housingSolo', e.target.checked)}/>
+          <span className="k">Stress test · you pay the whole mortgage alone <span className="muted small">· doubles the mortgage share until {fp.housingEndYear || 2054}</span></span>
+        </label>
+        <div className="sub" style={{marginTop:8}}>Spend from your Jul to Sep 2026 accounts: about € 2.750/mnd, of which € 528 is your half of the mortgage. Core spend leaves out the mortgage and the DUO loan (paid off around 2032). The mortgage share is a fixed payment, so it shrinks in today’s money and stops after {fp.housingEndYear || 2054}. The reserve is extra pot you still hold when the last pension starts, because from then on everything leans on pensions.</div>
         <div className="sub" style={{marginTop:8}}>Box 3 in 2026 · allowance € 59.357 per person, € 118.714 for two fiscal partners together (shared with the partner’s own box 3 assets) · fictitious return on investments 6,00% · rate 36%. The projection indexes the allowance with inflation every year.</div>
 
         <div className="mt" style={{borderTop:'1px solid var(--surface2)', paddingTop:14}}>
@@ -1946,7 +2074,7 @@ function FireTab({ data, setData, lens = 'sven' }){
         <span className="small muted">
           Coast FIRE reached at age <b className="num">{base.coastAge !== null ? base.coastAge : '—'}</b>, after that contributions become optional. ·
           {pensOn
-            ? <span> Pensions included · {aowOn ? 'AOW ' + fmt0(fp.aowAnnualGross * fp.aowBuildPct / 100) + '/jr from ' + fp.aowAge : 'AOW off'}{occOn ? ' · PME and old pots ' + fmt0(occGrossAt(fp, stopAt)) + '/jr kept at ' + stopAt : ''} (bruto, {fp.pensionNetPct || 85}% after tax), lowering the pot you need by {fmt0(credAtStop)} if you stop at {stopAt}.</span>
+            ? <span> Pensions included · {aowOn ? 'AOW ' + fmt0(fp.aowAnnualGross * fp.aowBuildPct / 100) + '/jr from ' + fp.aowAge : 'AOW off'}{occOn ? ' · PME and old pots ' + fmt0(occGrossAt(fp, stopAt)) + '/jr kept at ' + stopAt : ''} (bruto, {fp.pensionNetPre != null ? fp.pensionNetPre : 78}% net before AOW age, {fp.pensionNetPost != null ? fp.pensionNetPost : 87}% after), lowering the pot you need by {fmt0(credAtStop)} if you stop at {stopAt}.</span>
             : <span> Pensions excluded · toggle AOW and occupational pensions on in Assumptions.</span>}
         </span>
       </div>
@@ -3486,10 +3614,11 @@ function HistoryTab({ data, setData, lens = 'sven' }){
 
   const sumCat = c => data.assets.filter(a => a.category === c).reduce((s,a) => s + a.value, 0);
   const debt = data.liabilities.reduce((s,l) => s + l.value, 0);
+  const loanDebt = data.liabilities.filter(l => !isPropDebt(l)).reduce((s,l) => s + l.value, 0);
   const liquid = sumCat('stocks') + sumCat('crypto') + sumCat('savings');
   const savings = sumCat('savings');
-  const propEq = sumCat('property') - debt;
-  const netWorth = liquid + propEq;
+  const propEq = sumCat('property') - (debt - loanDebt);
+  const netWorth = liquid + propEq - loanDebt;
 
   const takeSnapshot = () => {
     const month = ISO(TODAY).slice(0,7);
@@ -5556,15 +5685,20 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   const liquid = sumCat('stocks') + sumCat('crypto') + sumCat('savings');
   const investable = investableOf(vAssets);   // FI input, same basis as the FIRE tab
   const propVal = sumCat('property');
-  const propEquity = propVal - debt;
-  const ltv = propVal > 0 ? debt / propVal * 100 : 0;
+  const propDebt = vLiabs.filter(isPropDebt).reduce((s,l) => s + l.value, 0);
+  const propEquity = propVal - propDebt;
+  const ltv = propVal > 0 ? propDebt / propVal * 100 : 0;
 
   /* FI target on the same basis as the FIRE tab: spend / SWR, nothing leaned on */
   const fcAnnual = (data.fixedCosts || []).reduce((s,c) => s + monthlyEq(c), 0) * 12;
   const spend = lens === 'sven' ? (fp.annualWithdrawal || 0)
     : (fp.householdSpend > 0 ? fp.householdSpend : fcAnnual);
   const swr = fp.swr || 4;
-  const fiTarget = spend > 0 ? spend / (swr / 100) : 0;
+  const fiTarget = spend > 0
+    ? (lens === 'sven'   // Me: the FIRE tab's own FI number (core spend plus the mortgage share while it runs)
+        ? potNeededAt(noPensions(fp), fp.targetAge || 55, fp.grossReturn || 7, fp.inflation != null ? fp.inflation : 2.5)
+        : spend / (swr / 100))
+    : 0;
   const fiPct = fiTarget > 0 ? Math.min(100, investable / fiTarget * 100) : 0;
 
   /* this month, mirroring the Budget tab */
