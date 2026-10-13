@@ -1283,7 +1283,7 @@ function charlottePlan(data){
    above it, a £3,000 allowance, and Private Residence Relief for the years she lived there plus the final 9 months.
    No April 2015 rebasing, which only matters for a flat bought before then. */
 const SALE_DEFAULTS = { planned:true, month:'2027-06', priceGBP:0, costsPct:2, livedYears:0, buyCostsGBP:0, ercGBP:0,
-  earmarkEUR:10000, homePct:50 };
+  earmarkEUR:10000, ownUseEUR:0, bufferTopUp:true, homePct:50 };
 function chSale(data){
   const fp = data.fireParams || {};
   const cp = chProfile(fp);
@@ -1318,12 +1318,32 @@ function chSale(data){
   }
   const netGBP = Math.max(0, price - sellCosts - mortGBP - erc - (cgt || 0));
   const netEUR = netGBP * fx;
-  const afterEarmark = Math.max(0, netEUR - Math.max(0, Number(sp.earmarkEUR) || 0));
-  const toHome = afterEarmark * Math.min(100, Math.max(0, Number(sp.homePct) || 0)) / 100;
-  const toInvest = afterEarmark - toHome;
+  /* Buckets, in order, each capped by what is left: already promised, her own use, the part of her cash buffer
+     still missing at the sale (after the monthly buffer savings until then), then the joint home %, the rest invested. */
+  const plan = charlottePlan(data);
+  const monthsToSale = Math.max(0, (saleYear - TODAY.getFullYear()) * 12 + (saleMonth - (TODAY.getMonth() + 1)));
+  const bufferGapAtSale = Math.max(0, plan.shortfall - plan.toBuffer * monthsToSale);
+  let rem = netEUR;
+  const promised = Math.min(rem, Math.max(0, Number(sp.earmarkEUR) || 0)); rem -= promised;
+  const ownUse = Math.min(rem, Math.max(0, Number(sp.ownUseEUR) || 0)); rem -= ownUse;
+  const topUp = sp.bufferTopUp ? Math.min(rem, bufferGapAtSale) : 0; rem -= topUp;
+  const afterEarmark = rem;                                           // what is left for the home / investing split
+  const toHome = rem * Math.min(100, Math.max(0, Number(sp.homePct) || 0)) / 100;
+  const toInvest = rem - toHome;
   const active = !!sp.planned && !!flat && saleYear >= TODAY.getFullYear();
   return { sp, flat, fx, price, valueGBP, sellCosts, mortGBP, erc, purchase, cgt, gain, prrPct, taxable, band, ownYears,
-    netGBP, netEUR, afterEarmark, toHome, toInvest, saleYear, saleMonth, active };
+    netGBP, netEUR, promised, ownUse, topUp, bufferGapAtSale, afterEarmark, toHome, toInvest, saleYear, saleMonth, active };
+}
+
+/* When her buffer is full, the money that went to it goes to investing instead. Full either by saving monthly
+   or, when the sale tops it up, at the sale. Returns { years, monthly } from now, or null. */
+function chStepUp(data, plan, sale){
+  const contrib = Number((data.fireParams || {}).charlotteContribution) || 0;
+  if (!(plan.shortfall > 0) || !(plan.toBuffer > 0) || !(contrib > 0)) return null;
+  const bySale = sale && sale.active && sale.sp.bufferTopUp && sale.topUp > 0;
+  const years = bySale ? Math.max(1, sale.saleYear - TODAY.getFullYear())
+    : Math.max(1, Math.ceil((plan.bufferMonthsToGo || 12) / 12));
+  return { years, monthly: contrib + plan.toBuffer };
 }
 
 function CharlotteFlatSale({ data, setData, s, fiAgeWith }){
@@ -1333,7 +1353,8 @@ function CharlotteFlatSale({ data, setData, s, fiAgeWith }){
   const setCP = (k, v) => setData({ ...data, fireParams: { ...fp, charlotteProfile: { ...cp, [k]: v } } });
   const g = v => gbpfmt(Math.round(v));
   const ageTxt = a => (a !== null && a !== undefined) ? 'age ' + a : 'beyond the horizon';
-  const scen = [['Keep it all as cash', 0], ['This split', s.toInvest], ['Invest all after promises', s.afterEarmark]];
+  const scen = [['Keep the rest as cash', 0], ['This split', s.toInvest], ['Invest the rest', s.afterEarmark]];
+  const goalAge = cp.targetAge;
   return (
     <div className="card">
       <div className="spread" style={{flexWrap:'wrap', gap:8}}>
@@ -1365,7 +1386,9 @@ function CharlotteFlatSale({ data, setData, s, fiAgeWith }){
             <div className="kv" style={{borderTop:'1px solid var(--surface2)', paddingTop:6}}><span className="k" style={{fontWeight:700}}>Net in £</span><span className="v" style={{fontWeight:800}}>{g(s.netGBP)}</span></div>
             <div className="kv"><span className="k">Net in € <span className="dim small">at {String(s.fx).replace('.', ',')}</span></span><span className="v" style={{fontWeight:800}}>{fmt0(s.netEUR)}</span></div>
             <div className="kv mt"><span className="k">Already promised € <span className="dim small">car and so on</span></span><span className="v"><NumInput value={s.sp.earmarkEUR} step={1000} width={90} onChange={v => setS('earmarkEUR', v)}/></span></div>
-            <div className="kv"><span className="k">Kept for a joint home</span><span className="v"><NumInput value={s.sp.homePct} step={10} width={64} onChange={v => setS('homePct', v)} suffix="%"/></span></div>
+            <div className="kv"><span className="k">For her own use € <span className="dim small">spend as she likes</span></span><span className="v"><NumInput value={s.sp.ownUseEUR} step={1000} width={90} onChange={v => setS('ownUseEUR', v)}/></span></div>
+            <div className="kv"><label className="k" style={{cursor:'pointer'}}><input type="checkbox" checked={!!s.sp.bufferTopUp} onChange={e => setS('bufferTopUp', e.target.checked)}/> Fill her cash buffer from it</label><span className="v">{s.sp.bufferTopUp ? fmt0(s.topUp) : '—'}</span></div>
+            <div className="kv"><span className="k">Kept for a joint home <span className="dim small">% of the rest, {fmt0(s.afterEarmark)}</span></span><span className="v"><NumInput value={s.sp.homePct} step={10} width={64} onChange={v => setS('homePct', v)} suffix="%"/></span></div>
             <div className="kv"><span className="k">Joint home pot</span><span className="v">{fmt0(s.toHome)}</span></div>
             <div className="kv"><span className="k" style={{fontWeight:700}}>Invested in her pot {s.saleYear}</span><span className="v green" style={{fontWeight:800}}>{fmt0(s.toInvest)}</span></div>
           </div>
@@ -1377,12 +1400,16 @@ function CharlotteFlatSale({ data, setData, s, fiAgeWith }){
           {scen.map(sc => (
             <div key={sc[0]} className="card" style={{margin:0, padding:'10px 12px'}}>
               <div className="small dim">{sc[0]}</div>
-              <div className="num" style={{fontWeight:800, fontSize:18}}>{ageTxt(fiAgeWith(sc[1]))}</div>
-              <div className="small dim">{fmt0(sc[1])} invested</div>
+              {(() => { const r = fiAgeWith(sc[1]); const pct = r.fireNumber > 0 ? Math.min(999, r.realAtTarget / r.fireNumber * 100) : 0;
+                return <React.Fragment>
+                  <div className="num" style={{fontWeight:800, fontSize:18}}>{r.fireAge !== null ? 'FI at ' + r.fireAge : 'FI after ' + (r.age0 + r.rows.length - 1)}</div>
+                  <div className="small">At {goalAge} {fmt0(r.realAtTarget)}, {Math.round(pct)}% of FI</div>
+                  <div className="small dim">{fmt0(sc[1])} invested</div>
+                </React.Fragment>; })()}
             </div>
           ))}
         </div>
-        <div className="sub mt">The projection on this page uses “This split”. Money kept for the joint home or already promised is not part of her FI pot.</div>
+        <div className="sub mt">The projection on this page uses “This split”, in today’s €. Money for the joint home, her own use, the buffer or already promised is not part of her FI pot.{s.sp.bufferTopUp && s.topUp > 0 ? ' With the buffer filled at the sale, what she saved into it each month goes to investing from then on.' : ''}</div>
         <h4 style={{margin:'16px 0 4px'}}>Around the sale</h4>
         <ul className="sub" style={{margin:'4px 0 0 18px', padding:0}}>
           <li>Report the sale to HMRC with a UK Property Disposal return within 60 days of completion, even when no tax is due, and pay any tax in the same window.</li>
@@ -1738,6 +1765,7 @@ function CharlotteStart({ data, setData, setTab }){
     return 'Her share of the joint account pays half of the mortgage on Sven’s flat, and flat sale money may go into it too. A notarial samenlevingscontract protects her share and, at the same address, makes them fiscal partners who can share Box 3 allowances.';
   };
   const leftover = p.free;
+  const step = chStepUp(data, p, chSale(data));
   return (
     <div className="card" style={{border:'1px solid var(--gold)'}}>
       <div className="spread" style={{cursor:'pointer', userSelect:'none'}} onClick={() => setOpen(o => !o)}>
@@ -1775,7 +1803,7 @@ function CharlotteStart({ data, setData, setTab }){
             <div className="sub">10% of what is left over stays loose for irregular costs. The rent surplus is kept out because the flat may be sold.</div>
             <div className="row mt" style={{gap:8, flexWrap:'wrap'}}>
               <button className="btn btn-green" onClick={apply} disabled={!(p.invest > 0) && !(p.toBuffer > 0)}>Use this plan</button>
-              {p.contrib > 0 && <span className="small dim">In the model now {fmt0(p.contrib)}/mo{p.contrib !== p.invest ? ', the plan says ' + fmt0(p.invest) + ', tap to update' : ''}{p.shortfall > 0 && cp.investAfterBuffer > p.contrib ? ', rising to ' + fmt0(cp.investAfterBuffer) + ' next year' : ''}</span>}
+              {p.contrib > 0 && <span className="small dim">In the model now {fmt0(p.contrib)}/mo{p.contrib !== p.invest ? ', the plan says ' + fmt0(p.invest) + ', tap to update' : ''}{step ? ', rising to ' + fmt0(step.monthly) + (step.years === 1 ? ' next year' : ' in ' + step.years + ' years') : ''}</span>}
             </div>
           </div>
         </div>
@@ -1863,6 +1891,7 @@ function PeopleFireView({ data, setData, lens, setTab }){
   const budgetFixedAnnual = Math.round((data.fixedCosts || []).reduce((s,c) => s + monthlyEq(c), 0) * 12);
   const chPlan = lens === 'charlotte' ? charlottePlan(data) : null;   // Charlotte: her own spend, not the household's
   const chSaleV = chPlan ? chSale(data) : null;                        // her planned flat sale
+  const chStep = chPlan ? chStepUp(data, chPlan, chSaleV) : null;
   const householdSpend = chPlan ? chPlan.spendY : ((fp.householdSpend && fp.householdSpend > 0) ? fp.householdSpend : budgetFixedAnnual);
   const spendIsDerived = !chPlan && !(fp.householdSpend && fp.householdSpend > 0);
 
@@ -1878,8 +1907,8 @@ function PeopleFireView({ data, setData, lens, setTab }){
   const svenSched = Array.isArray(fp.contributionSchedule) ? fp.contributionSchedule : [];
   const hhSched = lens === 'ours' ? svenSched.map(st => ({ fromAge: st.fromAge, monthly: (Number(st.monthly) || 0) + charContribM }))
                 : lens === 'sven' ? svenSched
-                : (chPlan && chPlan.shortfall > 0 && (Number(chPlan.cp.investAfterBuffer) || 0) > charContribM)   // buffer phase, then the full amount
-                  ? [{ fromAge: currentAge(chPlan.cp.birthYear, chPlan.cp.birthMD) + 1, monthly: Number(chPlan.cp.investAfterBuffer) }] : [];
+                : chStep   // buffer phase, then the buffer savings go to investing too
+                  ? [{ fromAge: currentAge(chPlan.cp.birthYear, chPlan.cp.birthMD) + chStep.years, monthly: chStep.monthly }] : [];
   const fiFp = { ...fp, contributionSchedule: hhSched, monthlyContribution: hhContribM,
                  annualWithdrawal: householdSpend, aowEnabled: false, occPensions: { ...(fp.occPensions || {}), enabled: false },
                  housingSpend: 0, reserveYears: 0,
@@ -1889,7 +1918,7 @@ function PeopleFireView({ data, setData, lens, setTab }){
                  box3Exempt: lens === 'ours' ? (Number(fp.box3Exempt) || 0) * 2 : fp.box3Exempt };
   const sim = simulate(investable, fiFp, fp.grossReturn, fp.inflation);   // sim.fireNumber === fiNumber
   const fiAgeWith = amt => simulate(investable, { ...fiFp, lumpSums: (chSaleV && chSaleV.active && amt > 0) ? [{ year: chSaleV.saleYear, amount: amt }] : [] },
-    fp.grossReturn, fp.inflation).fireAge;
+    fp.grossReturn, fp.inflation);
   const hasSpend = fiNumber > 0;                      // no spend set and no fixed costs: no target to measure against
   const pctToFI = hasSpend ? Math.min(100, investable / fiNumber * 100) : 0;
   const chartRows = sim.rows.filter(r => r.year <= sim.targetYear);
@@ -5962,7 +5991,7 @@ function ImpulseBuy({ data }){
   const yrs = Math.max(1, (fp.targetAge || 55) - age);
   const grow = Math.pow(1 + (fp.grossReturn || 7) / 100, yrs);
   const future = price * grow;
-  const contribM = (fp.monthlyContribution || 0) + (fp.charlotteContribution || 0);
+  const contribM = fp.monthlyContribution || 0;   // his own, like the income above
   const days = contribM > 0 ? price / (contribM / 30.4) : null;
   const hours = hourly > 0 ? price / hourly : null;
   const verdict = hours === null ? 'Set your income in Budget for the hours-of-life figure.'
@@ -6154,7 +6183,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   return (
     <div className="dash">
       <div className="dash-status">
-        <span>Sven Finance <span style={{opacity:.55}}>// v54</span></span>
+        <span>Sven Finance <span style={{opacity:.55}}>// v55</span></span>
         <span className="dstat">
           <span>Lens {(OWNERS[lens] || 'Ours')}</span>
           <span>{plural(vAssets.length, 'position')}</span>
