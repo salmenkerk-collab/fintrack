@@ -52,13 +52,7 @@
     padding-top:env(safe-area-inset-top);
   }
   .app{ max-width:1180px; margin:0 auto; padding:16px 16px 64px; }
-  main{ animation: tabIn .45s ease both; }
   @keyframes tabIn{from{opacity:0}to{opacity:1}}
-  main .card{ animation: secRise .5s ease both; }
-  .grid2 > .card:nth-child(2){ animation-delay:.07s }
-  .grid3 > .card:nth-child(2){ animation-delay:.07s } .grid3 > .card:nth-child(3){ animation-delay:.14s }
-  .stack > .card:nth-child(2){ animation-delay:.06s } .stack > .card:nth-child(3){ animation-delay:.12s }
-  .stack > .card:nth-child(4){ animation-delay:.18s } .stack > .card:nth-child(5){ animation-delay:.24s } .stack > .card:nth-child(6){ animation-delay:.30s }
   @keyframes secRise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
   @keyframes fadein{from{opacity:0}to{opacity:1}}
   @keyframes pop{from{opacity:0;transform:scale(0)}to{opacity:1;transform:scale(1)}}
@@ -67,7 +61,6 @@
   @keyframes rayPulse{0%,100%{opacity:1}50%{opacity:.5}}
   /* v37 — motion polish */
   @keyframes tabIn2{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-  main{ animation: tabIn2 .4s cubic-bezier(.25,.8,.3,1) both; }
   @keyframes growW{ from{ width:0 } }
   @keyframes sparkIn{ from{ stroke-dashoffset:1200 } to{ stroke-dashoffset:0 } }
   .growbar{ animation: growW .9s cubic-bezier(.25,.8,.3,1) both .12s; }
@@ -152,8 +145,8 @@
   .brand .tag{ font-size:9.5px; letter-spacing:2px; text-transform:uppercase; color:var(--gold); font-weight:600; margin-top:2px; }
   .lens{ display:inline-flex; gap:2px; background:rgba(33,31,27,.05); border:1px solid var(--rule); border-radius:12px; padding:3px; }
   .lens-btn{ border:none; background:none; font:inherit; font-size:12.5px; color:var(--muted); padding:6px 13px; border-radius:9px; cursor:pointer; transition:.15s; }
-  .lens-btn:hover{ color:var(--ink); }
-  .lens-btn.on{ background:var(--blue); color:var(--bg); font-weight:600; }
+  .lens-btn:hover{ color:var(--text); }
+  .lens-btn.on{ color:var(--bg); font-weight:600; }
   .liquid-pill{
     display:flex; flex-direction:column; align-items:flex-end; gap:1px;
     background:var(--surface); border:1px solid var(--surface2);
@@ -315,8 +308,131 @@
     .liquid-pill{ padding:6px 10px; }
     .header{ flex-wrap:wrap; }
   }
+  /* ================= v56 · motion and new model cards ================= */
+  :root{ --ease:cubic-bezier(.2,.8,.2,1); --spring:cubic-bezier(.3,1.35,.5,1); --glow:rgba(255,255,255,.5); --accent:#4A211C; }
+  html[data-lens="charlotte"]{ --glow:rgba(154,106,52,.13); --accent:#9A6A34; }
+  html[data-lens="ours"]{ --glow:rgba(94,107,59,.15); --accent:#5E6B3B; }
+  /* a slow dawn behind everything, tinted by the lens */
+  body::before{ content:''; position:fixed; inset:-20% -10% auto -10%; height:90vh; z-index:-1; pointer-events:none;
+    background:radial-gradient(48% 55% at 78% 8%, var(--glow), transparent 70%), radial-gradient(40% 45% at 12% 0%, rgba(152,140,108,.10), transparent 70%);
+    animation: dawnDrift 26s ease-in-out infinite alternate; transition: opacity .6s ease; }
+  @keyframes dawnDrift{ from{ transform:translate3d(-2%,0,0) scale(1) } to{ transform:translate3d(3%,2%,0) scale(1.08) } }
+
+  /* tab change: content slides in from the side you moved to, cards rise one after another */
+  @keyframes mainFromRight{ from{ opacity:0; transform:translateX(18px) } to{ opacity:1; transform:none } }
+  @keyframes mainFromLeft{ from{ opacity:0; transform:translateX(-18px) } to{ opacity:1; transform:none } }
+  @keyframes mainLens{ from{ opacity:0; transform:scale(.992) } to{ opacity:1; transform:none } }
+  main.from-right{ animation: mainFromRight .38s var(--ease) both; }
+  main.from-left{ animation: mainFromLeft .38s var(--ease) both; }
+  @keyframes mainLensB{ from{ opacity:0; transform:scale(.992) } to{ opacity:1; transform:none } }
+  main.from-lens.v0{ animation: mainLens .34s var(--ease) both; }
+  main.from-lens.v1{ animation: mainLensB .34s var(--ease) both; }
+  main [data-rv="0"]{ opacity:0; transform:translateY(20px) scale(.985); }
+  main [data-rv="1"]{ opacity:1; transform:none; transition: opacity .6s var(--ease) var(--rv-d,0ms), transform .7s var(--ease) var(--rv-d,0ms), border-color .2s ease, box-shadow .25s ease; }
+  ::view-transition-old(root){ animation: vtOut .2s ease both; }
+  ::view-transition-new(root){ animation: vtIn .3s ease both; }
+  @keyframes vtOut{ to{ opacity:0 } } @keyframes vtIn{ from{ opacity:0 } }
+
+  /* lens switch: a pill that slides, and a tab underline that follows */
+  .lens{ position:relative; display:inline-grid; grid-template-columns:repeat(3,1fr); gap:0; }
+  .lens-thumb{ position:absolute; top:3px; bottom:3px; left:3px; width:calc((100% - 6px) / 3); border-radius:9px; background:var(--accent);
+    transition: transform .42s var(--spring), background .4s ease; box-shadow:0 2px 8px rgba(33,31,27,.18); }
+  .lens-btn{ position:relative; z-index:1; text-align:center; transition: color .25s ease, transform .12s ease; }
+  .lens-btn.on{ background:none; }
+  .lens-btn:active{ transform:scale(.95); }
+  .tabs{ position:relative; }
+  .tab.active{ border-bottom-color:transparent; }
+  .tab-ind{ position:absolute; left:0; bottom:0; height:2px; border-radius:2px; background:var(--gold); pointer-events:none;
+    transition: transform .42s var(--spring), width .42s var(--spring); }
+  .tab{ transition: color .2s ease, transform .12s ease; }
+  .tab:active{ transform:scale(.96); }
+  .brand .wm .fin{ transition: color .4s ease; color:var(--accent); }
+
+  /* surfaces */
+  .card, .panel{ transition: border-color .2s ease, box-shadow .25s ease; }
+  .card:hover, .panel:hover{ box-shadow:0 6px 22px rgba(33,31,27,.06); }
+  .statbox{ transition: transform .18s var(--ease), background .2s ease; }
+  .statbox:hover{ transform:translateY(-1px); }
+  .statbox.big{ padding:11px 13px; } .statbox.big .sv{ font-size:23px; letter-spacing:-.4px; line-height:1.15; }
+  .btn:hover{ transform:translateY(-1px); box-shadow:0 3px 10px rgba(33,31,27,.08); }
+  .btn:active{ transform:scale(.96); box-shadow:none; }
+  .pill{ transition: transform .18s var(--ease), border-color .2s ease; } .pill:hover{ transform:translateY(-1px); border-color:var(--gold); }
+  input, select, textarea{ transition: border-color .18s ease, box-shadow .18s ease; }
+  input:focus, select:focus, textarea:focus{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(152,140,108,.18); }
+  .cat-header{ transition: background .2s ease, transform .12s ease; } .cat-header:active{ transform:scale(.995); }
+  .kv{ transition: background .15s ease; }
+  .modal-back{ animation: fadein .2s ease both; }
+  .modal{ animation: modalIn .32s var(--spring) both; }
+  @keyframes modalIn{ from{ opacity:0; transform:translateY(18px) scale(.97) } to{ opacity:1; transform:none } }
+  .toast{ animation: toastIn .35s var(--spring) both; }
+  @keyframes toastIn{ from{ opacity:0; transform:translate(-50%, 16px) } to{ opacity:1; transform:translate(-50%, 0) } }
+  .reveal-in{ animation: secRise .5s var(--ease) both; }
+  .pop{ animation: popIn .18s var(--ease) both; transform-origin:top left; }
+  @keyframes popIn{ from{ opacity:0; transform:scale(.92) } to{ opacity:1; transform:none } }
+
+  /* bars and markers */
+  .track{ position:relative; height:14px; background:var(--bg); border-radius:8px; margin-top:14px; }
+  .shine{ overflow:hidden; }
+  .shine::after{ content:''; position:absolute; top:0; bottom:0; left:-40%; width:40%;
+    background:linear-gradient(100deg, transparent, rgba(255,255,255,.38), transparent); animation: shineSweep 3.6s ease-in-out infinite 1.2s; }
+  @keyframes shineSweep{ 0%{ left:-40% } 55%,100%{ left:120% } }
+  .nudge .n-ico{ animation: dotPulse 2.4s ease-in-out infinite; }
+  @keyframes dotPulse{ 0%,100%{ opacity:1; transform:scale(1) } 50%{ opacity:.45; transform:scale(.8) } }
+  .ms{ animation: secRise .45s var(--ease) both; }
+  .ms:nth-child(2){ animation-delay:.05s } .ms:nth-child(3){ animation-delay:.1s } .ms:nth-child(4){ animation-delay:.15s }
+  .ms:nth-child(5){ animation-delay:.2s } .ms:nth-child(6){ animation-delay:.25s } .ms:nth-child(7){ animation-delay:.3s } .ms:nth-child(8){ animation-delay:.35s }
+  .ms.nxt{ animation: secRise .45s var(--ease) both, nextGlow 2.8s ease-in-out infinite 1s; }
+  @keyframes nextGlow{ 0%,100%{ box-shadow:0 0 0 0 rgba(185,138,46,0) } 50%{ box-shadow:0 0 0 4px rgba(185,138,46,.14) } }
+  .ms.hit .ms-ico, .msbox.on{ animation: pop .4s var(--spring) both .25s; }
+  .msrow{ animation: secRise .4s var(--ease) both; }
+  .msrow:nth-child(4){ animation-delay:.05s } .msrow:nth-child(5){ animation-delay:.1s } .msrow:nth-child(6){ animation-delay:.15s } .msrow:nth-child(7){ animation-delay:.2s }
+  .hero-num, .metric{ transition: color .3s ease; }
+  .ring-arc{ transition: stroke-dashoffset 1.25s var(--ease); }
+  tbody tr{ transition: background .15s ease; } tbody tr:hover{ background:rgba(33,31,27,.03); }
+
+  /* new model cards */
+  .chip{ display:inline-block; font-family:var(--mono); font-size:9.5px; letter-spacing:1.2px; text-transform:uppercase; color:var(--muted);
+    border:1px solid var(--rule); border-radius:999px; padding:3px 9px; white-space:nowrap; }
+  .lg{ display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:-1px; }
+  .tipbox{ background:var(--surface); border:1px solid var(--surface2); border-radius:10px; padding:8px 11px; font-size:12.5px; line-height:1.5;
+    box-shadow:0 8px 24px rgba(33,31,27,.12); }
+  .oddsbar{ height:6px; border-radius:4px; background:var(--surface2); overflow:hidden; margin-top:7px; }
+  .oddsbar > div{ height:100%; border-radius:4px; }
+  .thinking{ display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; }
+  .thinking-bars{ display:flex; align-items:flex-end; gap:5px; height:46px; }
+  .thinking-bars span{ width:7px; border-radius:3px; background:var(--gold); animation: eq 1s ease-in-out infinite; }
+  @keyframes eq{ 0%,100%{ height:18% ; opacity:.45 } 50%{ height:100%; opacity:1 } }
+  .seg{ display:inline-flex; background:rgba(33,31,27,.05); border:1px solid var(--rule); border-radius:10px; padding:2px; gap:2px; flex-wrap:wrap; }
+  .seg-btn{ border:none; background:none; font:inherit; font-size:12px; color:var(--muted); padding:5px 10px; border-radius:8px; cursor:pointer;
+    transition: background .22s ease, color .22s ease, transform .12s ease; }
+  .seg-btn.on{ background:var(--surface2); color:var(--text); font-weight:600; }
+  .seg-btn:active{ transform:scale(.96); }
+  .marginrow{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .margincell{ background:var(--bg); border:1px solid transparent; border-radius:9px; padding:8px 10px; min-width:0; }
+  .margincell.on{ border-color:var(--gold); }
+  .lever{ display:grid; grid-template-columns:minmax(0,1.5fr) minmax(60px,1fr) 118px; gap:10px; align-items:center; padding:6px 0; border-bottom:1px dashed var(--rule); font-size:13px; }
+  .lever:last-of-type{ border-bottom:none; }
+  .lever-track{ height:9px; border-radius:5px; background:var(--bg); overflow:hidden; }
+  .lever-bar{ height:100%; border-radius:5px; }
+  .lever-val{ text-align:right; font-weight:700; font-size:12.5px; white-space:nowrap; }
+  .regime{ text-align:left; font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--rule); border-radius:12px; padding:12px 13px; cursor:pointer;
+    transition: border-color .2s ease, transform .18s var(--ease), box-shadow .25s ease, background .25s ease; min-width:0; }
+  .regime:hover{ transform:translateY(-2px); border-color:var(--gold); }
+  .regime.on{ border-color:var(--green); background:var(--surface); box-shadow:0 0 0 3px rgba(94,107,59,.13); }
+  .regime.on .chip{ color:var(--green); border-color:var(--green); }
+  .hero-card{ border-color:rgba(94,107,59,.45); }
+  .racerow{ display:grid; grid-template-columns:78px minmax(0,1fr) 98px; gap:4px 10px; align-items:center; margin-bottom:10px; }
+  .race-lab{ font-weight:700; } .race-track{ height:14px; border-radius:7px; background:var(--bg); overflow:hidden; }
+  .race-bar{ height:100%; border-radius:7px; } .race-val{ font-weight:700; text-align:right; }
+  .race-sub{ grid-column:2 / 4; font-size:11.5px; margin-top:-2px; }
+  h4{ font-size:12.5px; font-weight:700; }
+  @media (max-width:640px){
+    .lever{ grid-template-columns:1fr 96px; } .lever-track{ grid-column:1 / 3; order:3; }
+    .marginrow{ grid-template-columns:repeat(2,1fr); }
+  }
   @media (prefers-reduced-motion: reduce){
-    *{ animation:none !important; transition:none !important; }
+    *, *::before, *::after{ animation:none !important; transition:none !important; }
+    main [data-rv="0"]{ opacity:1; transform:none; }
   }
 </style>
 </head>
@@ -324,11 +440,11 @@
 <div id="root"></div>
 
 <script type="text/babel" data-presets="react">
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect, useRef, useLayoutEffect } = React;
 /* Guarded so a chart-library load hiccup degrades to "charts missing" instead of a blank app. */
 const __R = (typeof Recharts !== 'undefined' && Recharts) ? Recharts : {};
 const { ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area, BarChart, Bar,
-        XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, Legend } = __R;
+        XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine, Legend, ComposedChart, Line } = __R;
 
 /* ============================ constants & helpers ============================ */
 const STORAGE_KEY = 'sven_finance_v1';
@@ -560,7 +676,7 @@ function seedData(){
       { id:'odip', group:'Subscriptions & Comms', name:'Odido phone', amount:26.00, note:'' },
       { id:'odii', group:'Subscriptions & Comms', name:'Odido internet (home)', amount:36.00, note:'No TV', shared:true },
       { id:'subs', group:'Subscriptions & Comms', name:'Streaming, apps, gym, etc.', amount:100.00, note:'Estimate — adjust' },
-      { id:'groc-shared', group:'Housing', name:'Shared groceries', amount:300.00, note:'From joint Revolut', shared:true },
+      { id:'groc-shared', group:'Housing', name:'Shared groceries', amount:300.00, note:'From the joint account', shared:true },
     ],
     property: { value:283000, mortgageBalance:229722.84, interestRate:3.0, size:66 },
     snapshots: [],
@@ -663,6 +779,18 @@ function migrate(d){
       d.settings._box3y2026V1 = true;
     }
   }
+  /* v56. Tax is part of the plan in both phases, and the model follows the cabinet's Box 3 plan
+     (capital gains from 2028) unless told otherwise. Set once, then yours to change. */
+  if (d.fireParams && d.settings && !d.settings._taxV56){
+    const ft = d.fireParams;
+    if (ft.box3Regime === undefined) ft.box3Regime = 'plan';
+    if (ft.box3DivYield === undefined) ft.box3DivYield = 1.3;
+    if (ft.box3GainShare === undefined) ft.box3GainShare = 60;
+    if (ft.box3Plan2027 === undefined) ft.box3Plan2027 = true;
+    if (ft.taxInRetirement === undefined) ft.taxInRetirement = true;
+    if (ft.promoInvest === undefined) ft.promoInvest = 300;
+    d.settings._taxV56 = true;
+  }
   if (!Array.isArray(d.goals)) d.goals = [{ id:'goal-car-2028', name:'New car', icon:'🚗', target:25000, targetDate:'2028-06', saved:0, monthly:0 }];
   /* one-time retro: tag already-imported broker funding (Flatex / DEGIRO / Trade Republic)
      and own-savings moves as transfers, so they drop out of spending & recurring-cost views */
@@ -687,7 +815,7 @@ function migrate(d){
     d.fixedCosts.forEach(c => { if (sharedIds[c.id]) c.shared = true; });
     const gas = d.fixedCosts.find(c => c.id === 'gas'); if (gas && gas.amount < 150) gas.amount = 150;
     if (!d.fixedCosts.some(c => c.id === 'groc-shared'))
-      d.fixedCosts.push({ id:'groc-shared', group:'Housing', name:'Shared groceries', amount:300, note:'From joint Revolut', shared:true });
+      d.fixedCosts.push({ id:'groc-shared', group:'Housing', name:'Shared groceries', amount:300, note:'From the joint account', shared:true });
     d.settings._sharedCostsV1 = true;
   }
   (d.fixedCosts || []).forEach(c => { if (!c.owner) c.owner = 'sven'; if (!c.currency) c.currency = 'EUR'; if (c.currency === 'GBP') c.amount = (c.fxAmount || 0) * ((d.fx && d.fx.GBP) || 1.17); });
@@ -757,26 +885,24 @@ function NumInput({ value, onChange, step=1, min, max, width=110, suffix }){
 }
 
 function HeaderPill({ liquid, snapshots, lens }){
-  const personal = !lens || lens === 'sven';
   const sorted = [...(snapshots||[])].sort((a,b) => a.date.localeCompare(b.date));
-  const last = sorted[sorted.length-1];
+  const last = snapFor(sorted[sorted.length-1], lens);
   let delta = null;
-  if (personal && last && last.liquidNW > 0){
+  if (last && !last.legacy && last.liquidNW > 0){
     const d = liquid - last.liquidNW;
     delta = { d, p: d / last.liquidNW * 100 };
   }
   const cls = !delta ? 'delta-zero' : delta.d >= 0 ? 'delta-pos' : 'delta-neg';
   const arrow = !delta ? '' : delta.d >= 0 ? '▲' : '▼';
+  const who = lens === 'ours' ? 'Household' : lens === 'charlotte' ? 'Charlotte' : '';
   return (
-    <div className="liquid-pill" title="Stocks + crypto + savings. Delta vs last snapshot in History.">
-      <span className="lp-label">Liquid NW</span>
+    <div className="liquid-pill" title="Stocks + crypto + savings for this lens. Delta vs the last snapshot in History.">
+      <span className="lp-label">{who ? who + ' · ' : ''}Liquid NW</span>
       <span className="lp-main"><b><CountUp value={liquid} format={fmt0}/></b></span>
       <span className={'lp-delta ' + cls}>
-        {!personal
-          ? (OWNERS[lens] || '') + ' view'
-          : (delta
-              ? arrow + ' ' + (delta.d >= 0 ? '+' : '\u2212') + fmt0(Math.abs(delta.d)) + ' (' + (delta.d >= 0 ? '+' : '') + pct1(delta.p) + ')'
-              : 'no snapshot yet')}
+        {delta
+          ? arrow + ' ' + (delta.d >= 0 ? '+' : '−') + fmt0(Math.abs(delta.d)) + ' (' + (delta.d >= 0 ? '+' : '') + pct1(delta.p) + ')'
+          : (last && last.legacy ? 'save a new snapshot' : 'no snapshot yet')}
       </span>
     </div>
   );
@@ -808,13 +934,20 @@ function NetWorthTab({ data, setData, lens = 'sven' }){
   const assets = data.assets, liabs = data.liabilities;
   const vAssets = assets.filter(a => lensMatch(a.owner, lens));
   const vLiabs = liabs.filter(l => lensMatch(l.owner, lens));
-  const sumCat = c => vAssets.filter(a => a.category === c).reduce((s,a) => s + a.value, 0);
-  const gross = vAssets.reduce((s,a) => s + a.value, 0);
-  const debt = vLiabs.reduce((s,l) => s + l.value, 0);
+  /* totals count a joint item for this lens's share; the rows below still show it in full */
+  const tAssets = lensItems(assets, lens, data), tLiabs = lensItems(liabs, lens, data);
+  const hasJointShare = lens !== 'ours' && vAssets.concat(vLiabs).some(x => x.owner === 'joint');
+  const sumCat = c => tAssets.filter(a => a.category === c).reduce((s,a) => s + a.value, 0);
+  const gross = tAssets.reduce((s,a) => s + a.value, 0);
+  const debt = tLiabs.reduce((s,l) => s + l.value, 0);
   const netWorth = gross - debt;
   const liquid = sumCat('stocks') + sumCat('crypto') + sumCat('savings');
-  const propEquity = sumCat('property') - vLiabs.filter(isPropDebt).reduce((s,l) => s + l.value, 0);
-  const savingsRate = data.income.sven > 0 ? data.fireParams.monthlyContribution / data.income.sven * 100 : 0;
+  const propEquity = sumCat('property') - tLiabs.filter(isPropDebt).reduce((s,l) => s + l.value, 0);
+  const nwFp = data.fireParams || {}, nwInc = data.income || {};
+  const investM = lens === 'charlotte' ? (Number(nwFp.charlotteContribution) || 0)
+    : (Number(nwFp.monthlyContribution) || 0) + (lens === 'ours' ? (Number(nwFp.charlotteContribution) || 0) : 0);
+  const incomeM = lens === 'charlotte' ? (nwInc.charlotte || 0) : (nwInc.sven || 0) + (lens === 'ours' ? (nwInc.charlotte || 0) : 0);
+  const savingsRate = incomeM > 0 ? investM / incomeM * 100 : 0;
 
   const donutData = ASSET_CATS.map(c => ({ name:c.name, value:sumCat(c.id), fill:c.color }))
                               .filter(d => d.value > 0);
@@ -941,9 +1074,10 @@ function NetWorthTab({ data, setData, lens = 'sven' }){
 
       <div className="pills-row" style={{marginTop:0}}>
         <span className="pill"><span className="k">Liquid</span> <span className="num">{fmt0(liquid)}</span></span>
-        <span className="pill" title="What the FIRE tab and dashboard count. Savings pots only if ticked."><span className="k">FI pot</span> <span className="num">{fmt0(investableOf(vAssets))}</span></span>
+        <span className="pill" title="What the FIRE tab and dashboard count. Savings pots only if ticked."><span className="k">FI pot</span> <span className="num">{fmt0(investableOf(tAssets))}</span></span>
         <span className="pill"><span className="k">Property equity</span> <span className="num">{fmt0(propEquity)}</span></span>
-        <span className="pill"><span className="k">Savings rate</span> <span className="num green">{pct1(savingsRate)}</span></span>
+        <span className="pill" title="Monthly investing as a share of take-home pay, for this lens"><span className="k">Investing rate</span> <span className="num green">{pct1(savingsRate)}</span></span>
+        {hasJointShare && <span className="pill"><span className="k">Joint items count for {Math.round(lensShare('joint', lens, data) * 100)}% here</span></span>}
       </div>
 
       <div className="layout-side">
@@ -1423,11 +1557,94 @@ function CharlotteFlatSale({ data, setData, s, fiAgeWith }){
   );
 }
 
-/* Grow a pot with no new money, net of Box 3 drag (same rules as simulate).
-   t0 = years from today at the start, so the indexed Box 3 allowance lines up with the calendar. */
+/* ---------- time. The projection runs on exact ages, so "at 52" means the 52nd birthday and nothing
+   jumps a whole year on the day of a birthday. ---------- */
+function birthParts(birthMD){
+  const md = /^\d{2}-\d{2}$/.test(birthMD || '') ? birthMD : '11-16';
+  return [parseInt(md.slice(0, 2), 10) - 1, parseInt(md.slice(3), 10)];
+}
+function exactAge(birthYear, birthMD){
+  const bp = birthParts(birthMD);
+  return (TODAY - new Date(Number(birthYear) || 1997, bp[0], bp[1], 12)) / (365.25 * 86400000);
+}
+function decNow(){ const y = TODAY.getFullYear(); return y + (TODAY - new Date(y, 0, 1)) / (365.25 * 86400000); }
+/* "52" or "52 y 4 m" from an exact age. */
+function ageYM(x){
+  if (x === null || x === undefined || !isFinite(x)) return '—';
+  let y = Math.floor(x + 1e-6), m = Math.floor((x - y) * 12 + 1e-6);
+  if (m >= 12){ y += 1; m = 0; }
+  return m > 0 ? y + ' y ' + m + ' m' : String(y);
+}
+
+/* ---------- Box 3. Three regimes.
+   'law'   today's forfait system kept forever: a fictitious return on everything above the allowance.
+   'plan'  the cabinet plan as known on 10 Nov 2026 (novelle of 29 Sep 2026, not yet law): in 2027 the
+           forfait rises to 7,87% and the allowance drops to € 30.846, and from 2028 shares, funds and
+           bonds are taxed on dividends every year and on gains only when sold, with € 1.000 of result free.
+   'none'  no tax at all, the classic spreadsheet. ---------- */
+const BOX3_PLAN = { from: 2028, exemptResult: 1000, allowance2027: 30846, forfait2027: 7.87, asOf: '10 Nov 2026' };
+function box3Regime(fp){ const r = fp && fp.box3Regime; return (r === 'law' || r === 'none') ? r : 'plan'; }
+function box3N(fp){ return Math.max(1, Number(fp.box3Persons) || 1); }
+function box3Rate(fp){ return (Number(fp.box3TaxRate) || 0) / 100; }
+function box3Div(fp){ const d = Number(fp.box3DivYield); return ((fp.box3DivYield != null && d >= 0) ? d : 1.3) / 100; }
+function box3Gain(fp){ const g = Number(fp.box3GainShare); return Math.min(1, Math.max(0, ((fp.box3GainShare != null && g >= 0) ? g : 60) / 100)); }
+function forfaitPts(p, ex, fp, forfaitPct){
+  if (!(p > ex)) return 0;
+  return forfaitPct / 100 * box3Rate(fp) * ((p - ex) / p) * 100;
+}
+
+/* While you build. Tax drag in %-points of the whole pot for the model year that starts t years from
+   today. The year that counts is the 1 January inside that model year. */
+function box3Drag(p, fp, t, inflPct){
+  const reg = box3Regime(fp);
+  if (reg === 'none' || !(p > 0)) return 0;
+  const n = box3N(fp), f = 1 + (Number(inflPct) || 0) / 100, tt = t || 0;
+  const yr = Math.floor(decNow() + tt + 1e-9) + 1;
+  if (reg === 'plan' && yr >= BOX3_PLAN.from){
+    const free = BOX3_PLAN.exemptResult * n * Math.pow(f, Math.max(0, yr - BOX3_PLAN.from));
+    const taxable = box3Div(fp) * p - free;
+    return taxable > 0 ? box3Rate(fp) * taxable / p * 100 : 0;
+  }
+  if (reg === 'plan' && yr === 2027 && fp.box3Plan2027 !== false)
+    return forfaitPts(p, BOX3_PLAN.allowance2027 * n, fp, BOX3_PLAN.forfait2027);
+  return forfaitPts(p, (Number(fp.box3Exempt) || 0) * n * Math.pow(f, tt), fp, Number(fp.box3FictitiousReturn) || 0);
+}
+/* After you stop, in today's money. Yearly tax on the pot itself, in %-points. */
+function box3DragDec(p, fp){
+  const reg = box3Regime(fp);
+  if (reg === 'none' || !(p > 0)) return 0;
+  if (reg === 'plan') return box3Rate(fp) * box3Div(fp) * 100;
+  return forfaitPts(p, (Number(fp.box3Exempt) || 0) * box3N(fp), fp, Number(fp.box3FictitiousReturn) || 0);
+}
+/* Selling to pay for spending realises gains. Under the plan one net euro costs this much from the pot. */
+function drawGrossUp(fp){
+  if (box3Regime(fp) !== 'plan' || fp.taxInRetirement === false) return 1;
+  return 1 / Math.max(0.3, 1 - box3Rate(fp) * box3Gain(fp));
+}
+/* The pot that pays a net amount L every year at the SWR, with the tax on the pot paid out of the same
+   withdrawal. Without tax this is the classic L / SWR. */
+function lastingPot(L, fp, swr){
+  if (!(L > 0)) return 0;
+  const reg = box3Regime(fp), p0 = L / swr;
+  if (reg === 'none' || fp.taxInRetirement === false) return p0;
+  const tau = box3Rate(fp);
+  if (reg === 'law'){
+    const k = (Number(fp.box3FictitiousReturn) || 0) / 100 * tau, ex = (Number(fp.box3Exempt) || 0) * box3N(fp);
+    if (p0 <= ex) return p0;
+    return (L - k * ex) / Math.max(0.005, swr - k);
+  }
+  const d = box3Div(fp), c = d + box3Gain(fp) * Math.max(0, swr - d), E = BOX3_PLAN.exemptResult * box3N(fp);
+  if (c * p0 <= E) return p0;
+  return (L - tau * E) / Math.max(0.005, swr - tau * c);
+}
+
+/* Grow a pot with no new money, net of Box 3 drag (same rules as simulate). Years may be fractional.
+   t0 = years from today at the start, so the tax year lines up with the calendar. */
 function growNoContrib(p, years, fp, grossPct, inflPct, t0){
   let v = p;
-  for (let t = 0; t < years; t++) v = v * (1 + (grossPct - (box3Drag(v, fp, (t0 || 0) + t, inflPct) || 0)) / 100);
+  const n = Math.floor(years + 1e-9), rem = years - n;
+  for (let t = 0; t < n; t++) v = v * (1 + (grossPct - (box3Drag(v, fp, (t0 || 0) + t, inflPct) || 0)) / 100);
+  if (rem > 1e-9) v = v * Math.pow(1 + (grossPct - (box3Drag(v, fp, (t0 || 0) + n, inflPct) || 0)) / 100, rem);
   return v;
 }
 
@@ -1443,15 +1660,6 @@ function coastNeededToday(targetNominal, years, fp, grossPct, inflPct){
     if (growNoContrib(mid, years, fp, grossPct, inflPct, 0) >= targetNominal) hi = mid; else lo = mid;
   }
   return hi;
-}
-
-/* Box 3 drag in %-points of the whole pot (forfaitair system): fictitious return x rate on the part
-   above the allowance. The allowance (heffingsvrij vermogen) is indexed every year, so year t uses
-   today's figure grown with inflation. Without t / inflPct it is today's figure. */
-function box3Drag(p, fp, t, inflPct){
-  const ex = (Number(fp.box3Exempt) || 0) * Math.pow(1 + (Number(inflPct) || 0) / 100, t || 0);
-  if (!(p > ex)) return 0;
-  return fp.box3FictitiousReturn/100 * fp.box3TaxRate/100 * ((p - ex) / p) * 100; // %-points
 }
 
 /* Occupational pensions (mijnpensioenoverzicht.nl, bruto per jaar). An active scheme keeps accruing while
@@ -1496,41 +1704,56 @@ function pensionNetFactor(fp){
 /* Before AOW age a pension is taxed at the full box 1 rate (no AOW-age bracket, no ouderenkorting). */
 function pensionNetPreFactor(fp){ const n = Number(fp.pensionNetPre); return (n > 0 ? n : 78) / 100; }
 /* Same plan with every pension switched off: "could the pot carry everything on its own". */
-function noPensions(fp){ return { ...fp, aowEnabled: false, occPensions: { ...(fp.occPensions || {}), enabled: false } }; }
-/* Model ages run October to October (birthday 16 Nov), so the year you are `age` is birthYear + age + 1.
-   The mortgage is paid through housingEndYear, so the first age without it is housingEndYear - birthYear. */
-function housingEndAge(fp){ return (Number(fp.housingEndYear) || 0) - (Number(fp.birthYear) || 0); }
-/* Spend in today's money in the year you are `age`. Core spend is real. The mortgage share is a fixed
-   nominal payment, so in today's money it shrinks with inflation, and it stops when the mortgage ends.
-   housingSolo is the stress case where Sven pays the whole payment alone. */
+function noPensions(fp){ return { ...fp, aowEnabled: false, extraStreams: [], occPensions: { ...(fp.occPensions || {}), enabled: false } }; }
+/* Exact age on the 1 January after the last year the mortgage is paid. */
+function housingEndX(fp){
+  const bp = birthParts(fp.birthMD);
+  const birth = (Number(fp.birthYear) || 1997) + (new Date(2001, bp[0], bp[1]) - new Date(2001, 0, 1)) / (365 * 86400000);
+  return (Number(fp.housingEndYear) || 0) + 1 - birth;
+}
+function housingEndAge(fp){ return Math.floor(housingEndX(fp)); }
+/* Spend in today's money over the year that starts at exact age `age`. Core spend is real. The mortgage
+   share is a fixed nominal payment, so in today's money it shrinks with inflation, and it stops when the
+   mortgage ends (a part year counts for its share). housingSolo is the stress case where Sven pays it all. */
 function spendAt(fp, age, ageNow, inflPct){
   const core = Number(fp.annualWithdrawal) || 0;
   const h = (Number(fp.housingSpend) || 0) * (fp.housingSolo ? 2 : 1);
-  if (!(h > 0) || age >= housingEndAge(fp)) return core;
-  return core + h / Math.pow(1 + (Number(inflPct) || 0) / 100, Math.max(0, age - ageNow));
+  if (!(h > 0)) return core;
+  const share = Math.min(1, Math.max(0, housingEndX(fp) - age));
+  if (!(share > 0)) return core;
+  return core + h * share / Math.pow(1 + (Number(inflPct) || 0) / 100, Math.max(0, age - ageNow));
 }
 /* Pension streams (bruto per year) as kept when you stop at stopAge. AOW only when switched on. The
-   haircut stresses the occupational pensions (conditional indexation, Wtp scenario risk). */
+   haircut stresses the occupational pensions (conditional indexation, Wtp scenario risk). extraStreams
+   are someone else's pensions in a household plan, already after tax (isNet). */
 function pensionStreamsFor(fp, stopAge){
   const out = [];
   if (fp.aowEnabled)
-    out.push({ startAge: Number(fp.aowAge) || 70, indexed: true,
+    out.push({ kind:'aow', startAge: Number(fp.aowAge) || 70, indexed: true,
                gross: (Number(fp.aowAnnualGross) || 0) * (Number(fp.aowBuildPct) || 0) / 100 });
   const op = fp.occPensions || {};
   if (op.enabled !== false){
     const keep = 1 - Math.min(100, Math.max(0, Number(op.haircutPct) || 0)) / 100;
-    (op.streams || []).forEach(x => out.push({ startAge: Number(x.startAge) || 68, indexed: x.indexed !== false,
+    (op.streams || []).forEach(x => out.push({ kind:'occ', startAge: Number(x.startAge) || 68, indexed: x.indexed !== false,
       gross: occKeptAt(x, stopAge, fp.birthYear) * keep }));
   }
+  (fp.extraStreams || []).forEach(x => out.push({ kind: x.kind || 'partner', startAge: Number(x.startAge) || 70,
+    indexed: x.indexed !== false, gross: Number(x.gross) || 0, isNet: !!x.isNet }));
   return out.filter(x => x.gross > 0);
 }
-/* Pension income after tax, in today's money, in the year you are `age`. A pot that is not
-   inflation-proof keeps its nominal amount, so it loses value from today onward. */
-function pensionNetAt(fp, streams, age, ageNow, inflPct){
-  const net = age < (Number(fp.aowAge) || 70) ? pensionNetPreFactor(fp) : pensionNetFactor(fp);
+/* Pension income after tax, in today's money, over the year that starts at exact age `age`. A stream
+   that starts part way through the year counts for that part. A pot that is not inflation-proof keeps
+   its nominal amount, so it loses value from today onward. */
+function pensionNetAt(fp, streams, age, ageNow, inflPct, kind){
+  const aowAge = Number(fp.aowAge) || 70;
+  const pre = pensionNetPreFactor(fp), post = pensionNetFactor(fp);
   const f = 1 + (Number(inflPct) || 0) / 100;
   return streams.reduce((t, x) => {
-    if (age < x.startAge) return t;
+    if (kind && x.kind !== kind) return t;
+    const on = Math.min(1, Math.max(0, age + 1 - x.startAge));
+    if (!(on > 0)) return t;
+    const late = Math.min(on, Math.max(0, age + 1 - aowAge));
+    const net = x.isNet ? on : (on - late) * pre + late * post;
     return t + (x.indexed ? x.gross : x.gross / Math.pow(f, Math.max(0, age - ageNow))) * net;
   }, 0);
 }
@@ -1541,14 +1764,17 @@ function pensionNetAt(fp, streams, age, ageNow, inflPct){
    capitalised at the SWR, plus a reserve of reserveYears x core spend because from then on everything
    leans on pensions (longevity, Wtp cuts, spending shocks). Only when pensions are part of the plan.
    The bridge is simulated year by year: withdrawal at the start of the year, then growth at the real
-   return capped at the SWR (sequence-risk margin) minus Box 3 drag on what is left. Bisection on the
-   starting pot, like coastNeededToday. Memoised, because simulate asks for every age. */
+   return capped at the SWR (sequence-risk margin) minus the tax on the pot. Tax is part of the answer:
+   the lasting part pays its own Box 3 out of the same withdrawal (lastingPot), and under the capital
+   gains plan every euro drawn in the bridge is grossed up for the gain it realises (drawGrossUp).
+   Bisection on the starting pot, like coastNeededToday. Memoised, because simulate asks for every age. */
 const __potMemo = new Map();
 function potNeededAt(fp, stopAge, grossPct, inflPct){
   const key = JSON.stringify([fp.annualWithdrawal, fp.housingSpend, fp.housingEndYear, fp.housingSolo, fp.reserveYears,
     fp.swr, fp.aowEnabled, fp.aowAge, fp.aowAnnualGross, fp.aowBuildPct, fp.pensionNetPre, fp.pensionNetPost,
-    fp.pensionNetPct, fp.occPensions, fp.birthYear, fp.birthMD, fp.box3FictitiousReturn, fp.box3TaxRate, fp.box3Exempt,
-    stopAge, grossPct, inflPct]);
+    fp.pensionNetPct, fp.occPensions, fp.extraStreams, fp.birthYear, fp.birthMD, fp.box3FictitiousReturn, fp.box3TaxRate,
+    fp.box3Exempt, fp.box3Regime, fp.box3Persons, fp.box3DivYield, fp.box3GainShare, fp.taxInRetirement,
+    Math.round(stopAge * 1000), grossPct, inflPct]);
   if (__potMemo.has(key)) return __potMemo.get(key);
   const v = potNeededCalc(fp, stopAge, grossPct, inflPct);
   if (__potMemo.size > 20000) __potMemo.clear();
@@ -1558,29 +1784,29 @@ function potNeededAt(fp, stopAge, grossPct, inflPct){
 function potNeededCalc(fp, stopAge, grossPct, inflPct){
   const swr = (Number(fp.swr) > 0 ? Number(fp.swr) : 4) / 100;
   const infl = Number(inflPct) || 0;
-  const ageNow = currentAge(fp.birthYear, fp.birthMD);
+  const ageNow = exactAge(fp.birthYear, fp.birthMD);
   const streams = pensionStreamsFor(fp, stopAge);
-  const hEnd = ((Number(fp.housingSpend) || 0) > 0) ? housingEndAge(fp) : 0;
+  const hEnd = ((Number(fp.housingSpend) || 0) > 0) ? housingEndX(fp) : 0;
   const last = Math.max.apply(null, [stopAge, hEnd].concat(streams.map(x => x.startAge)));
   const shortfall = a => Math.max(0, spendAt(fp, a, ageNow, infl) - pensionNetAt(fp, streams, a, ageNow, infl));
   const reserve = streams.length ? Math.max(0, Number(fp.reserveYears) || 0) * (Number(fp.annualWithdrawal) || 0) : 0;
   /* Two parts. The lasting part covers the shortfall that never goes away (after the last pension starts)
-     at the SWR, held from the stop age on, exactly as without any bridge. The bridge part pays everything
-     above that until the last start age and still holds the reserve at the end; it grows at the real return
-     capped at the SWR, minus the Box 3 drag of the whole pot. So stopping after every pension has started,
-     or with no pensions and no mortgage, gives plain shortfall / SWR. */
+     at the SWR, held from the stop age on. The bridge part pays everything above that until the last start
+     age and still holds the reserve at the end. So stopping after every pension has started, or with no
+     pensions and no mortgage, gives the plain lasting pot. */
   const lastingDraw = shortfall(last);
-  const lasting = lastingDraw / swr;
+  const lasting = lastingPot(lastingDraw, fp, swr);
   if (last <= stopAge) return lasting + reserve;
+  const G = drawGrossUp(fp);
   const draws = [];
-  for (let a = stopAge; a < last; a++) draws.push(Math.max(0, shortfall(a) - lastingDraw));
+  for (let a = stopAge; a < last; a++) draws.push(Math.max(0, shortfall(a) - lastingDraw) * G);
   const grossCap = Math.min(Number(grossPct) || 0, ((1 + swr) * (1 + infl / 100) - 1) * 100);
   const survives = B => {
     let p = B;
     for (let i = 0; i < draws.length; i++){
       p -= draws[i];
       if (p < 0) return false;
-      p *= (1 + (grossCap - box3Drag(p + lasting, fp, 0, infl)) / 100) / (1 + infl / 100);
+      p *= (1 + (grossCap - box3DragDec(p + lasting, fp)) / 100) / (1 + infl / 100);
     }
     return p >= reserve;
   };
@@ -1597,63 +1823,103 @@ function contribAtAge(fp, age){
   for (const s of sched){ if (age >= s.fromAge) m = Number(s.monthly) || 0; }
   return m;
 }
+/* Average monthly amount over the year that starts at exact age a. A step-up that lands inside the
+   year counts for the part of the year after it. */
+function contribForYear(fp, a){
+  const sched = (fp.contributionSchedule || []).slice().sort((x, y) => x.fromAge - y.fromAge);
+  let m = Number(fp.monthlyContribution) || 0, at = a, sum = 0;
+  for (const s of sched){
+    const b = Number(s.fromAge);
+    if (b <= a){ m = Number(s.monthly) || 0; continue; }
+    if (b >= a + 1) break;
+    sum += m * (b - at); at = b; m = Number(s.monthly) || 0;
+  }
+  return sum + m * (a + 1 - at);
+}
+/* One-off amounts that land in the model year starting t years from today. */
+function lumpInYear(fp, now, t){
+  return (fp.lumpSums || []).reduce((s, x) => {
+    const w = x.when != null ? Number(x.when) : (Number(x.year) || 0) + 0.5;
+    return s + ((w >= now + t && w < now + t + 1) ? (Number(x.amount) || 0) : 0);
+  }, 0);
+}
 
-/* Simulate one scenario. Returns trajectory rows + key milestones. */
+/* Simulate one scenario. Row t is the pot t years from today. Returns trajectory rows + key milestones.
+   FI and coast moments are interpolated between rows, so ages come out exact (fireAgeX, coastAgeX). */
 function simulate(startNW, fp, grossPct, inflPct){
-  const startYear = TODAY.getFullYear();
-  const age0 = currentAge(fp.birthYear, fp.birthMD);
-  const targetYear = startYear + (fp.targetAge - age0);
+  const startYear = TODAY.getFullYear(), now = decNow();
+  const ax = exactAge(fp.birthYear, fp.birthMD);
+  const age0 = Math.floor(ax + 1e-9);
+  const T = Math.max(0, (Number(fp.targetAge) || 0) - ax);       // years from today to the target birthday
+  const targetYear = Math.floor(now + T + 1e-9);
+  const f = 1 + inflPct / 100;
   const pureFp = noPensions(fp);
   const pureAt = age => potNeededAt(pureFp, age, grossPct, inflPct);     // nothing leaned on
   const fireFull = pureAt(fp.targetAge);                     // today's money, portfolio-only, stopping at target age
   // The pot you need depends on WHEN you stop: bridge to each pension from that age (potNeededAt),
   // so every simulated year gets its own target instead of one number fixed at target age.
   const needAt = age => Math.max(0, potNeededAt(fp, age, grossPct, inflPct));   // today's money, bridge model
-  const pensionCredit = fireFull - needAt(fp.targetAge);                       // how much the pensions save you
   const fireNumber = needAt(fp.targetAge);                   // today's money, stopping at target age
-  const horizon = Math.max(fp.targetAge - age0, 1) + 12;     // sim a bit past target
+  const pensionCredit = fireFull - fireNumber;               // how much the pensions save you
+  const horizon = Math.max(Math.ceil(T), 1) + 12;            // sim a bit past target
+  const cross = (t, prev, cur) => (t === 0 || prev === null || !(prev < 0)) ? t : (t - 1) + (-prev) / (cur - prev);
 
   const rows = [];
-  let v = startNW, fireYear = null;
+  let v = startNW, basis = startNW, fireT = null, prevD = null;
   for (let t = 0; t <= horizon; t++){
-    const year = startYear + t, age = age0 + t;
-    const real = v / Math.pow(1 + inflPct/100, t);
-    const fireAtT = needAt(age) * Math.pow(1 + inflPct/100, t);
-    rows.push({ year, age, nominal:Math.round(v), real:Math.round(real),
-                fireTarget:Math.round(fireAtT) });
-    if (fireYear === null && v >= fireAtT) fireYear = year;
+    const ageX = ax + t;
+    const need = needAt(ageX);
+    const fireAtT = need * Math.pow(f, t);
+    const d = v - fireAtT;
+    if (fireT === null && d >= 0) fireT = cross(t, prevD, d);
+    prevD = d;
     const drag = box3Drag(v, fp, t, inflPct);
-    const net = (grossPct - drag) / 100;
-    const growth = v * net;
-    rows[rows.length-1].growth = Math.round(growth);
-    const monthly = contribAtAge(fp, age);
-    rows[rows.length-1].contrib = monthly * 12;
-    const lump = (fp.lumpSums || []).filter(x => x.year === year).reduce((s, x) => s + (Number(x.amount) || 0), 0);
-    v = v + growth + monthly * 12 + lump;
+    const growth = v * (grossPct - drag) / 100;
+    const monthly = contribForYear(fp, ageX);
+    const lump = lumpInYear(fp, now, t);
+    rows.push({ t, year: startYear + t, age: Math.round(ageX), ageX, nominal: Math.round(v), real: Math.round(v / Math.pow(f, t)),
+      fireTarget: Math.round(fireAtT), needReal: Math.round(need), growth: Math.round(growth), contrib: Math.round(monthly * 12),
+      lump: Math.round(lump), gainPct: v > 0 ? Math.max(0, 1 - basis / v) : 0 });
+    const next = v + growth + monthly * 12 + lump;
+    /* cost basis: assumed reset to the market value on 1 January 2028, then money in plus reinvested dividends */
+    if (Math.floor(now + t + 1e-9) + 1 <= BOX3_PLAN.from) basis = next;
+    else basis += monthly * 12 + lump + box3Div(fp) * v * (1 - box3Rate(fp));
+    v = next;
   }
+  const valAt = (key, x) => {
+    const i = Math.max(0, Math.min(rows.length - 2, Math.floor(x))), a = rows[i][key], b = rows[i + 1][key], w = x - i;
+    return (a > 0 && b > 0) ? a * Math.pow(b / a, w) : a + (b - a) * w;
+  };
 
-  /* Coast FIRE: earliest year where value, grown with no more contributions (gross
-     return minus Box 3 drag), still reaches the inflation-adjusted FIRE number at target age. */
-  const yearsToTarget = targetYear - startYear;
-  const fireAtTarget = fireNumber * Math.pow(1 + inflPct/100, yearsToTarget);
-  let coastYear = null;
+  /* Coast FIRE: the earliest moment where the pot, grown with no more contributions (gross return minus
+     Box 3 drag), still reaches the inflation-adjusted FIRE number at target age. */
+  const fireAtTarget = fireNumber * Math.pow(f, T);
+  let coastT = null, prevC = null;
   for (const r of rows){
-    if (r.year > targetYear) break;
-    const grown = growNoContrib(r.nominal, targetYear - r.year, fp, grossPct, inflPct, r.year - startYear);
-    if (grown >= fireAtTarget){ coastYear = r.year; break; }
+    if (r.t > T + 1e-9) break;
+    const c = growNoContrib(r.nominal, T - r.t, fp, grossPct, inflPct, r.t) - fireAtTarget;
+    if (c >= 0){ coastT = cross(r.t, prevC, c); break; }
+    prevC = c;
   }
+  const nominalAtTarget = valAt('nominal', T);
+  if (coastT === null && nominalAtTarget >= fireAtTarget) coastT = T;
 
-  const atTarget = rows.find(r => r.year === targetYear) || rows[rows.length-1];
-  const fireAge = fireYear !== null ? age0 + (fireYear - startYear) : null;
+  const fireAgeX = fireT !== null ? ax + fireT : null;
+  const coastAgeX = coastT !== null ? ax + coastT : null;
   return {
-    rows, fireNumber, fireYear, fireAge,
-    yearsToFire: fireYear !== null ? fireYear - startYear : null,
-    coastYear, coastAge: coastYear !== null ? age0 + (coastYear - startYear) : null,
-    realAtTarget: atTarget ? atTarget.real : 0,
-    fireAtTarget, targetYear, age0, startYear, fireFull, pensionCredit,
-    targetAtFire: fireAge !== null ? needAt(fireAge) : null,                       // today's money
-    pensionCreditAtFire: fireAge !== null ? pureAt(fireAge) - needAt(fireAge) : null,
-    fireFullAtFire: fireAge !== null ? pureAt(fireAge) : null,
+    rows, fireNumber, fireT, fireAgeX,
+    fireYear: fireT !== null ? Math.floor(now + fireT + 1e-9) : null,
+    fireAge: fireAgeX !== null ? Math.floor(fireAgeX + 1e-6) : null,
+    yearsToFire: fireT !== null ? Math.round(fireT) : null,
+    coastT, coastAgeX,
+    coastYear: coastT !== null ? Math.floor(now + coastT + 1e-9) : null,
+    coastAge: coastAgeX !== null ? Math.floor(coastAgeX + 1e-6) : null,
+    realAtTarget: Math.round(valAt('real', T)),
+    gainAtTarget: rows[Math.max(0, Math.min(rows.length - 1, Math.round(T)))].gainPct,
+    fireAtTarget, targetYear, age0, ax, T, startYear, fireFull, pensionCredit,
+    targetAtFire: fireAgeX !== null ? needAt(fireAgeX) : null,                       // today's money
+    pensionCreditAtFire: fireAgeX !== null ? pureAt(fireAgeX) - needAt(fireAgeX) : null,
+    fireFullAtFire: fireAgeX !== null ? pureAt(fireAgeX) : null,
   };
 }
 
@@ -1661,7 +1927,7 @@ function simulate(startNW, fp, grossPct, inflPct){
 function monthlyNeeded(startNW, fp){
   const test = m => simulate(startNW, { ...fp, monthlyContribution:m, contributionSchedule:[] }, fp.grossReturn, fp.inflation);
   let lo = 0, hi = 20000;
-  const hits = m => { const s = test(m); return s.fireYear !== null && s.fireYear <= s.targetYear; };
+  const hits = m => { const s = test(m); return s.fireT !== null && s.fireT <= s.T + 1e-6; };
   if (hits(0)) return 0;
   if (!hits(hi)) return null;
   for (let i = 0; i < 40; i++){
@@ -1669,6 +1935,130 @@ function monthlyNeeded(startNW, fp){
     if (hits(mid)) hi = mid; else lo = mid;
   }
   return Math.ceil(hi / 10) * 10;
+}
+
+/* ============================ Monte Carlo ============================
+   The straight line above is one future. These run a few thousand, each with its own market, to turn
+   the plan into odds. Returns are fat-tailed (Student-t, 5 degrees of freedom) around the same long-run
+   compound return, so the median path is the straight-line projection. Seeded, so the same inputs give
+   the same picture every time. */
+function rng32(seed){
+  let a = seed >>> 0;
+  return function(){ a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+function fatDraw(rnd){
+  const nrm = () => { let u = 0; while (u === 0) u = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rnd()); };
+  let chi = 0;
+  for (let i = 0; i < 5; i++){ const z = nrm(); chi += z * z; }
+  return Math.max(-6, Math.min(6, nrm() / Math.sqrt(chi / 5) * Math.sqrt(3 / 5)));   // unit variance
+}
+/* Yearly volatility from what the FI pot actually holds: world shares about 16%, crypto about 65%,
+   half correlated, cash 0. */
+function potVolatility(assets){
+  const fi = (assets || []).filter(isFiAsset);
+  const tot = fi.reduce((s, a) => s + (a.value || 0), 0);
+  if (!(tot > 0)) return 16;
+  const w = c => fi.filter(a => a.category === c).reduce((s, a) => s + (a.value || 0), 0) / tot;
+  const ws = w('stocks'), wc = w('crypto'), ss = 0.16, sc = 0.65;
+  const v = ws * ws * ss * ss + wc * wc * sc * sc + 2 * 0.5 * ws * wc * ss * sc;
+  return Math.round(Math.min(40, Math.max(6, Math.sqrt(v) * 100)) * 10) / 10;
+}
+function quantile(sorted, q){
+  if (!sorted.length) return 0;
+  const i = (sorted.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+}
+function mcRun(startNW, fp, grossPct, inflPct, volPct, paths){
+  const now = decNow(), ax = exactAge(fp.birthYear, fp.birthMD);
+  const T = Math.max(0, (Number(fp.targetAge) || 0) - ax);
+  const H = Math.max(Math.ceil(T), 1) + 12, N = paths || 2000;
+  const f = 1 + inflPct / 100, sig = (Number(volPct) || 16) / 100, g1 = 1 + grossPct / 100;
+  const need = [], contrib = [], lump = [], defl = [];
+  for (let t = 0; t <= H; t++){
+    need.push(Math.max(0, potNeededAt(fp, ax + t, grossPct, inflPct)));
+    contrib.push(contribForYear(fp, ax + t) * 12); lump.push(lumpInYear(fp, now, t)); defl.push(Math.pow(f, t));
+  }
+  const rnd = rng32(20261110);
+  const cols = []; for (let t = 0; t <= H; t++) cols.push(new Float64Array(N));
+  const fiTs = new Float64Array(N);
+  let byTarget = 0;
+  for (let p = 0; p < N; p++){
+    let v = startNW, fiT = Infinity, prevD = null;
+    for (let t = 0; t <= H; t++){
+      const real = v / defl[t];
+      cols[t][p] = real;
+      const d = real - need[t];
+      if (fiT === Infinity && d >= 0) fiT = (t === 0 || prevD === null || !(prevD < 0)) ? t : (t - 1) + (-prevD) / (d - prevD);
+      prevD = d;
+      const r = g1 * Math.exp(sig * fatDraw(rnd)) - 1;
+      v = Math.max(0, v * (1 + r - box3Drag(v, fp, t, inflPct) / 100) + contrib[t] + lump[t]);
+    }
+    fiTs[p] = fiT;
+    if (fiT <= T + 1e-6) byTarget++;
+  }
+  const rows = [];
+  for (let t = 0; t <= H; t++){
+    const s = Array.prototype.slice.call(cols[t]).sort((a, b) => a - b);
+    const q = [0.1, 0.25, 0.5, 0.75, 0.9].map(x => Math.round(quantile(s, x)));
+    let done = 0; for (let p = 0; p < N; p++) if (fiTs[p] <= t) done++;
+    rows.push({ t, age: Math.round(ax + t), year: TODAY.getFullYear() + t, p10: q[0], p25: q[1], p50: q[2], p75: q[3], p90: q[4],
+      base: q[0], b1: q[1] - q[0], b2: q[3] - q[1], b3: q[4] - q[3], need: Math.round(need[t]), fiPct: Math.round(done / N * 1000) / 10 });
+  }
+  const fs = Array.prototype.slice.call(fiTs).sort((a, b) => a - b);
+  const qa = x => { const v = quantile(fs, x); return isFinite(v) ? ax + v : null; };
+  return { rows, N, T, H, ax, vol: sig * 100, pTarget: byTarget / N * 100,
+    fiEarly: qa(0.1), fiMedian: qa(0.5), fiLate: fs[Math.floor((N - 1) * 0.9)] === Infinity ? null : qa(0.9),
+    never: fs.filter(x => x === Infinity).length / N * 100 };
+}
+
+/* The years after you stop, in today's money. One row per year from the stop age to endAge: what the
+   year costs, what AOW and the pensions bring in after tax, what the pot has to pay (with the tax on
+   it), and what is left. Deterministic, at the expected real return. */
+function bridgeLedger(fp, stopAge, pot, grossPct, inflPct, endAge){
+  const infl = Number(inflPct) || 0, ageNow = exactAge(fp.birthYear, fp.birthMD);
+  const streams = pensionStreamsFor(fp, stopAge), G = drawGrossUp(fp);
+  const realR = (1 + grossPct / 100) / (1 + infl / 100) - 1;
+  const rows = [];
+  let p = pot, emptyAt = null;
+  for (let a = stopAge; a < (endAge || 95); a++){
+    const spend = spendAt(fp, a, ageNow, infl);
+    const aow = pensionNetAt(fp, streams, a, ageNow, infl, 'aow');
+    const occ = pensionNetAt(fp, streams, a, ageNow, infl, 'occ');
+    const partner = pensionNetAt(fp, streams, a, ageNow, infl, 'partner');
+    const gap = Math.max(0, spend - aow - occ - partner);
+    const tax = gap * (G - 1) + Math.max(0, p - gap * G) * box3DragDec(p, fp) / 100;
+    const paid = Math.min(Math.max(0, p), gap * G);
+    if (emptyAt === null && p < gap * G - 1) emptyAt = a;
+    rows.push({ age: Math.round(a), ageX: a, spend: Math.round(spend), aow: Math.round(aow), occ: Math.round(occ), partner: Math.round(partner),
+      fromPot: Math.round(paid / G), tax: Math.round(tax), short: Math.round(Math.max(0, gap - paid / G)), pot: Math.round(Math.max(0, p)) });
+    p = Math.max(0, p - gap * G);
+    p = p * (1 + realR - box3DragDec(p, fp) / 100);
+  }
+  return { rows, emptyAt, endPot: Math.round(p), streams };
+}
+/* The same years under a few thousand markets: how often does the pot last to endAge. */
+function bridgeStress(fp, stopAge, pot, grossPct, inflPct, volPct, endAge, paths){
+  const infl = Number(inflPct) || 0, ageNow = exactAge(fp.birthYear, fp.birthMD);
+  const streams = pensionStreamsFor(fp, stopAge), G = drawGrossUp(fp);
+  const sig = (Number(volPct) || 16) / 100, gr = (1 + grossPct / 100) / (1 + infl / 100), N = paths || 1500;
+  const gaps = [];
+  for (let a = stopAge; a < (endAge || 95); a++)
+    gaps.push(Math.max(0, spendAt(fp, a, ageNow, infl) - pensionNetAt(fp, streams, a, ageNow, infl)) * G);
+  const rnd = rng32(19971116);
+  let ok = 0; const ends = [], fails = [];
+  for (let k = 0; k < N; k++){
+    let p = pot, dead = null;
+    for (let i = 0; i < gaps.length; i++){
+      if (p < gaps[i]){ dead = stopAge + i; break; }
+      p -= gaps[i];
+      p = Math.max(0, p * (gr * Math.exp(sig * fatDraw(rnd)) - box3DragDec(p, fp) / 100));
+    }
+    if (dead === null){ ok++; ends.push(p); } else fails.push(dead);
+  }
+  ends.sort((a, b) => a - b); fails.sort((a, b) => a - b);
+  return { N, success: ok / N * 100, medianEnd: ends.length ? quantile(ends, 0.5) : 0,
+    earlyFail: fails.length ? quantile(fails, 0.1) : null };
 }
 
 /* FIRE milestones ladder: classic waypoints + Half/Coast/FI, deduped when crowded. */
@@ -1846,15 +2236,15 @@ function PeopleFireView({ data, setData, lens, setTab }){
   const [showRE, setShowRE] = useState(false);
   const fp = data.fireParams;
   const fxRate = (data.fx && data.fx.GBP) || 1.17;
-  const A = (data.assets || []).filter(a => lensMatch(a.owner, lens));
-  const L = (data.liabilities || []).filter(l => lensMatch(l.owner, lens));
+  const A = lensItems(data.assets, lens, data);
+  const L = lensItems(data.liabilities, lens, data);
   const TYPE = [
     { key:'stocks',   label:'Stocks',           color:'var(--green)' },
     { key:'crypto',   label:'Crypto',           color:'var(--orange)' },
     { key:'savings',  label:'Savings',          color:'var(--gold)' },
     { key:'property', label:'Property (stones)', color:'var(--blue)' },
   ];
-  const owns = (x, id) => (x.owner || 'sven') === id;
+  const owns = (x, id) => lens !== 'ours' || (x.owner || 'sven') === id;
   const breakdownFor = id => {
     const sum = cat => A.filter(a => owns(a, id) && a.category === cat).reduce((s,a) => s + a.value, 0);
     const propVal = sum('property');
@@ -1897,33 +2287,22 @@ function PeopleFireView({ data, setData, lens, setTab }){
 
   // FI-FIRST: the headline is a clean, self-funded target — annual spend / SWR (the 4% rule).
   // Nothing leaned on. Pensions + rental only matter for RE timing, in the collapsed section below.
-  const fiNumber = Math.round(householdSpend / (fp.swr / 100));
   const xMult = Math.round(1 / (fp.swr / 100));
 
   const svenContribM = Number(fp.monthlyContribution) || 0;
   const charContribM = Number(fp.charlotteContribution) || 0;
-  const hhContribM = lens === 'ours' ? (svenContribM + charContribM) : (lens === 'charlotte' ? charContribM : svenContribM);
-
-  const svenSched = Array.isArray(fp.contributionSchedule) ? fp.contributionSchedule : [];
-  const hhSched = lens === 'ours' ? svenSched.map(st => ({ fromAge: st.fromAge, monthly: (Number(st.monthly) || 0) + charContribM }))
-                : lens === 'sven' ? svenSched
-                : chStep   // buffer phase, then the buffer savings go to investing too
-                  ? [{ fromAge: currentAge(chPlan.cp.birthYear, chPlan.cp.birthMD) + chStep.years, monthly: chStep.monthly }] : [];
-  const fiFp = { ...fp, contributionSchedule: hhSched, monthlyContribution: hhContribM,
-                 annualWithdrawal: householdSpend, aowEnabled: false, occPensions: { ...(fp.occPensions || {}), enabled: false },
-                 housingSpend: 0, reserveYears: 0,
-                 ...(chPlan ? { targetAge: chPlan.cp.targetAge, birthYear: chPlan.cp.birthYear, birthMD: chPlan.cp.birthMD,
-                   lumpSums: (chSaleV && chSaleV.active && chSaleV.toInvest > 0) ? [{ year: chSaleV.saleYear, amount: chSaleV.toInvest }] : [] } : {}),
-                 // household pot: two people, so two Box 3 allowances
-                 box3Exempt: lens === 'ours' ? (Number(fp.box3Exempt) || 0) * 2 : fp.box3Exempt };
-  const sim = simulate(investable, fiFp, fp.grossReturn, fp.inflation);   // sim.fireNumber === fiNumber
-  const fiAgeWith = amt => simulate(investable, { ...fiFp, lumpSums: (chSaleV && chSaleV.active && amt > 0) ? [{ year: chSaleV.saleYear, amount: amt }] : [] },
-    fp.grossReturn, fp.inflation);
-  const hasSpend = fiNumber > 0;                      // no spend set and no fixed costs: no target to measure against
-  const pctToFI = hasSpend ? Math.min(100, investable / fiNumber * 100) : 0;
-  const chartRows = sim.rows.filter(r => r.year <= sim.targetYear);
-  const yearsToT = Math.max(sim.targetYear - sim.startYear, 0);
-  const coastToday = coastNeededToday(sim.fireAtTarget, yearsToT, fiFp, fp.grossReturn, fp.inflation);
+  /* her own plan, built in one place (planFor) so the dashboard shows the same numbers */
+  const plan = planFor(data, lens);
+  const fiFp = plan.fp;
+  const hhContribM = Number(fiFp.monthlyContribution) || 0;
+  const sim = simulate(investable, fiFp, fp.grossReturn, fp.inflation);
+  const fiNumber = Math.round(sim.fireFull);           // her spend carried by investments alone, tax on the pot included
+  const fiAgeWith = amt => simulate(investable, { ...fiFp, lumpSums: (chSaleV && chSaleV.active && amt > 0)
+    ? [{ year: chSaleV.saleYear, when: chSaleV.saleYear + (chSaleV.saleMonth - 0.5) / 12, amount: amt }] : [] }, fp.grossReturn, fp.inflation);
+  const hasSpend = householdSpend > 0;                // no spend set: no target to measure against
+  const pctToFI = hasSpend && fiNumber > 0 ? Math.min(100, investable / fiNumber * 100) : 0;
+  const chartRows = sim.rows.filter(r => r.t <= Math.ceil(sim.T));
+  const coastToday = coastNeededToday(sim.fireAtTarget, sim.T, fiFp, fp.grossReturn, fp.inflation);
   const incomeM = lens === 'ours' ? (((data.income||{}).sven||0) + ((data.income||{}).charlotte||0)) : (((data.income||{})[lens]) || 0);
   const investRate = incomeM > 0 ? Math.min(100, hhContribM / incomeM * 100) : null;
 
@@ -1995,7 +2374,7 @@ function PeopleFireView({ data, setData, lens, setTab }){
 
       <div className="card">
         <h2>{lens === 'ours' ? 'Financial independence · Ours' : (OWNERS[lens] || 'Charlotte') + ' — financial independence'}</h2>
-        <div className="sub mb">Your investable pot against a clean FI number: annual spend × {xMult} (the {fp.swr}% rule). Nothing leaned on — just “could our investments carry us, full stop.” Pensions and rent are an RE timing bonus, tucked below.</div>
+        <div className="sub mb">Her investable pot against a clean FI number. Her own spend carried by investments alone at a {fp.swr}% withdrawal rate, with the tax on the pot paid out of that same withdrawal. Nothing leaned on, no pensions, no rent.</div>
         <div className="grid2">
           <div>
             {chPlan
@@ -2003,15 +2382,15 @@ function PeopleFireView({ data, setData, lens, setTab }){
               : <div className="kv"><span className="k">Household spend / yr</span>
               <span className="v"><NumInput value={householdSpend} step={500} width={110} onChange={v => setFP('householdSpend', v)}/></span></div>}
             {chPlan && <div className="kv"><span className="k">FI age goal</span><span className="v">{chPlan.cp.targetAge}</span></div>}
-            <div className="kv"><span className="k">FI number (spend × {xMult})</span><span className="v" style={{fontWeight:800}}>{fmt0(fiNumber)}</span></div>
+            <div className="kv"><span className="k">FI number <span className="dim small">spend × {xMult} would be {fmt0(householdSpend * xMult)} before tax{plan.chPaysHalf ? ', her mortgage half ends in ' + (fp.housingEndYear || 2054) : ''}</span></span><span className="v" style={{fontWeight:800}}>{fmt0(fiNumber)}</span></div>
             <div className="kv"><span className="k">Investable pot</span><span className="v">{fmt0(investable)}</span></div>
             {investRate !== null && <div className="kv"><span className="k">Investing rate</span><span className="v">{pct1(investRate)}</span></div>}
           </div>
           <div>
             {lens !== 'charlotte' && <div className="kv"><span className="k">Sven invests / mo</span><span className="v"><NumInput value={svenContribM} step={50} width={90} onChange={v => setFP('monthlyContribution', v)}/></span></div>}
             {lens !== 'sven' && <div className="kv"><span className="k">Charlotte invests / mo</span><span className="v"><NumInput value={charContribM} step={50} width={90} onChange={v => setFP('charlotteContribution', v)}/></span></div>}
-            <div className="kv"><span className="k">On track to FI by</span><span className="v">{!hasSpend ? 'set spend first' : sim.fireAge !== null ? 'age ' + sim.fireAge : '> horizon'}</span></div>
-            <div className="kv"><span className="k">Coast FI by</span><span className="v">{!hasSpend ? '—' : sim.coastAge !== null ? 'age ' + sim.coastAge : '—'}</span></div>
+            <div className="kv"><span className="k">On track to FI by</span><span className="v">{!hasSpend ? 'set spend first' : sim.fireAgeX !== null ? 'age ' + ageYM(sim.fireAgeX) : '> horizon'}</span></div>
+            <div className="kv"><span className="k">Coast FI by</span><span className="v">{!hasSpend ? '—' : sim.coastAgeX !== null ? 'age ' + ageYM(sim.coastAgeX) : '—'}</span></div>
           </div>
         </div>
         <div className="spread mt" style={{alignItems:'flex-end', flexWrap:'wrap', gap:8}}>
@@ -2022,7 +2401,7 @@ function PeopleFireView({ data, setData, lens, setTab }){
           <div className="num muted">{fmt0(investable)} / {fmt0(fiNumber)}</div>
         </div>
         <div style={{position:'relative', height:14, background:'var(--bg)', borderRadius:8, marginTop:14}}>
-          <div className="growbar" style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
+          <div className="growbar shine" style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
             background:'linear-gradient(90deg,#4A211C,#5E6B3B)', borderRadius:8, transition:'width .4s'}}/>
         </div>
         <div className="spread" style={{marginTop:6}}>
@@ -2105,6 +2484,555 @@ function PeopleFireView({ data, setData, lens, setTab }){
             </ResponsiveContainer>
           </div>
         </div>}
+      {hasSpend && <OddsCard plan={plan} setFP={setFP}/>}
+      {hasSpend && <LeversCard plan={plan} data={data} setData={setData}/>}
+      {hasSpend && <TaxCard plan={plan} setFP={setFP}/>}
+    </div>
+  );
+}
+
+/* ============================ model cards shared by Me, Charlotte and Ours ============================ */
+/* Heavy work runs just after paint, so a tab opens at once and the result fades in. */
+function useDeferred(fn, key){
+  const [res, setRes] = useState(null);
+  useEffect(() => {
+    let live = true;
+    const id = setTimeout(() => { if (live) setRes({ key, val: fn() }); }, 40);
+    return () => { live = false; clearTimeout(id); };
+  }, [key]);
+  return res && res.key === key ? res.val : null;
+}
+const kEur = v => '€' + Math.round(v / 1000) + 'k';
+function spanTxt(months){
+  const m = Math.round(Math.abs(months));
+  if (m < 12) return m + ' mo';
+  return Math.floor(m / 12) + ' y' + (m % 12 ? ' ' + (m % 12) + ' m' : '');
+}
+function Thinking({ h, label }){
+  return (
+    <div className="thinking" style={{height: h || 220}}>
+      <div className="thinking-bars">{[0,1,2,3,4,5,6].map(i => <span key={i} style={{animationDelay: (i * 0.09) + 's'}}/>)}</div>
+      <div className="mono-lab">{label || 'Running the numbers'}</div>
+    </div>
+  );
+}
+function Seg({ value, options, onChange }){
+  return (
+    <span className="seg">
+      {options.map(o => <button key={String(o[0])} className={'seg-btn' + (value === o[0] ? ' on' : '')} onClick={() => onChange(o[0])}>{o[1]}</button>)}
+    </span>
+  );
+}
+
+/* ---- Odds: Monte Carlo fan ---- */
+function OddsCard({ plan, setFP }){
+  const fp = plan.fp;
+  const key = JSON.stringify([plan.pot, fp, plan.g, plan.infl, plan.vol]);
+  const mc = useDeferred(() => mcRun(plan.pot, fp, plan.g, plan.infl, plan.vol, 2000), key);
+  const target = Number(fp.targetAge) || 0;
+  const rows = mc ? mc.rows.filter(r => r.t <= Math.ceil(mc.T) + 4) : [];
+  const tip = o => {
+    if (!o || !o.active || !o.payload || !o.payload.length) return null;
+    const r = o.payload[0].payload;
+    return (
+      <div className="tipbox">
+        <div style={{fontWeight:700, marginBottom:3}}>Age {r.age} · {r.year}</div>
+        <div>Lucky 1 in 10 <b className="num">{fmt0(r.p90)}</b></div>
+        <div>Middle <b className="num">{fmt0(r.p50)}</b></div>
+        <div>Unlucky 1 in 10 <b className="num">{fmt0(r.p10)}</b></div>
+        <div className="dim">Needed to stop {fmt0(r.need)} · {pct1(r.fiPct)} already FI</div>
+      </div>
+    );
+  };
+  const p = mc ? mc.pTarget : 0;
+  const tone = p >= 75 ? 'var(--green)' : p >= 40 ? 'var(--yellow)' : 'var(--red)';
+  return (
+    <div className="card">
+      <div className="spread" style={{flexWrap:'wrap', gap:8}}>
+        <h2 style={{margin:0}}>🎲 The odds · 2.000 possible futures</h2>
+        <span className="chip">volatility {pct1(plan.vol)} {Number((fp || {}).mcVol) > 0 ? 'set by hand' : 'from today’s mix'}</span>
+      </div>
+      <div className="sub mb">The straight line is one future. Here every year gets its own market, with crashes and booms, around the same long-run {pct1(plan.g)} return. The band holds 8 of 10 outcomes, in today’s €.</div>
+      {!mc ? <Thinking h={330} label="Simulating 2.000 markets"/> : <React.Fragment>
+        <div className="grid3 reveal-in">
+          <div className="statbox big">
+            <div className="mono-lab">Chance of FI by {target}</div>
+            <div className="sv" style={{color:tone}}><CountUp value={p} format={pct1}/></div>
+            <div className="oddsbar"><div className="growbar" style={{width: Math.max(1, Math.min(100, p)) + '%', background: tone}}/></div>
+          </div>
+          <div className="statbox big">
+            <div className="mono-lab">Middle outcome</div>
+            <div className="sv">{mc.fiMedian !== null ? 'FI at ' + ageYM(mc.fiMedian) : 'beyond ' + Math.round(mc.ax + mc.H)}</div>
+            <div className="sub">half of the futures get there sooner</div>
+          </div>
+          <div className="statbox big">
+            <div className="mono-lab">Lucky to unlucky</div>
+            <div className="sv">{mc.fiEarly !== null ? Math.floor(mc.fiEarly) : '—'} <span className="dim">to</span> {mc.fiLate !== null ? Math.floor(mc.fiLate) : Math.round(mc.ax + mc.H) + '+'}</div>
+            <div className="sub">best and worst 1 in 10{mc.never > 0.5 ? ' · ' + pct1(mc.never) + ' never within the horizon' : ''}</div>
+          </div>
+        </div>
+        <div style={{width:'100%', height:290, marginTop:12}} className="reveal-in">
+          <ResponsiveContainer>
+            <ComposedChart data={rows} margin={{top:8, right:10, left:4, bottom:0}}>
+              <CartesianGrid stroke="var(--rule)" strokeDasharray="3 3"/>
+              <XAxis dataKey="age" tick={{fontSize:11, fill:'var(--muted)'}}/>
+              <YAxis tickFormatter={kEur} tick={{fontSize:11, fill:'var(--muted)'}} width={52}/>
+              <Tooltip content={tip}/>
+              <Area type="monotone" dataKey="base" stackId="fan" stroke="none" fill="none" isAnimationActive={false}/>
+              <Area type="monotone" dataKey="b1" stackId="fan" stroke="none" fill="var(--green)" fillOpacity={0.14} animationDuration={700}/>
+              <Area type="monotone" dataKey="b2" stackId="fan" stroke="none" fill="var(--green)" fillOpacity={0.3} animationDuration={900} animationBegin={150}/>
+              <Area type="monotone" dataKey="b3" stackId="fan" stroke="none" fill="var(--green)" fillOpacity={0.14} animationDuration={1100} animationBegin={300}/>
+              <Line type="monotone" dataKey="p50" stroke="var(--green)" strokeWidth={2.2} dot={false} animationDuration={1200} animationBegin={350}/>
+              <Line type="monotone" dataKey="need" stroke="var(--red)" strokeWidth={1.6} strokeDasharray="5 4" dot={false} animationDuration={1200} animationBegin={500}/>
+              <ReferenceLine x={Math.round(target)} stroke="var(--gold)" strokeDasharray="4 4" label={{value:'goal ' + target, fontSize:10, fill:'var(--gold)', position:'insideTopLeft'}}/>
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="row small" style={{gap:14, flexWrap:'wrap', marginTop:4}}>
+          <span><i className="lg" style={{background:'var(--green)', opacity:.75}}/>middle path</span>
+          <span><i className="lg" style={{background:'var(--green)', opacity:.3}}/>8 of 10 futures</span>
+          <span><i className="lg" style={{background:'var(--red)'}}/>pot needed to stop at that age</span>
+        </div>
+        <h4 style={{margin:'16px 0 4px'}}>Chance of being FI by each age</h4>
+        <div style={{width:'100%', height:150}}>
+          <ResponsiveContainer>
+            <AreaChart data={mc.rows} margin={{top:6, right:10, left:4, bottom:0}}>
+              <defs><linearGradient id="cdfg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--blue)" stopOpacity={0.45}/><stop offset="100%" stopColor="var(--blue)" stopOpacity={0.03}/>
+              </linearGradient></defs>
+              <CartesianGrid stroke="var(--rule)" strokeDasharray="3 3"/>
+              <XAxis dataKey="age" tick={{fontSize:11, fill:'var(--muted)'}}/>
+              <YAxis domain={[0, 100]} tickFormatter={v => v + '%'} tick={{fontSize:11, fill:'var(--muted)'}} width={52}/>
+              <Tooltip formatter={v => pct1(v)} labelFormatter={a => 'By age ' + a}/>
+              <Area type="monotone" dataKey="fiPct" name="FI in this share of futures" stroke="var(--blue)" strokeWidth={2} fill="url(#cdfg)" animationDuration={1000}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="row mt" style={{gap:10, flexWrap:'wrap', alignItems:'center'}}>
+          {setFP && <React.Fragment>
+            <span className="small muted">Volatility</span>
+            <NumInput value={Number(fp.mcVol) > 0 ? fp.mcVol : plan.vol} step={1} width={70} suffix="% a year" onChange={v => setFP('mcVol', v)}/>
+            {Number(fp.mcVol) > 0 && <button className="btn" style={{padding:'3px 10px', fontSize:12}} onClick={() => setFP('mcVol', 0)}>Back to my mix</button>}
+          </React.Fragment>}
+          <span className="small dim">World shares swing about 16% a year and crypto about 65%. Bad years cluster more than a bell curve says, so the draws have fat tails.</span>
+        </div>
+      </React.Fragment>}
+    </div>
+  );
+}
+
+/* ---- Bridge map: the years after stopping ---- */
+function BridgeCard({ plan, sim }){
+  const fp = plan.fp;
+  const lo = Math.floor(sim.ax) + 1, hi = Math.max(lo + 1, Math.min(69, Math.floor(sim.ax + sim.rows.length - 1)));
+  const [stop, setStop] = useState(Math.min(hi, Math.max(lo, Math.round(Number(fp.targetAge) || 55))));
+  const [basis, setBasis] = useState('need');
+  const need = Math.max(0, potNeededAt(fp, stop, plan.g, plan.infl));
+  const tt = Math.max(0, Math.min(sim.rows.length - 1.001, stop - sim.ax)), i0 = Math.floor(tt);
+  const have = sim.rows[i0].real + (sim.rows[i0 + 1].real - sim.rows[i0].real) * (tt - i0);
+  const pot = basis === 'need' ? need : have;
+  const led = bridgeLedger(fp, stop, pot, plan.g, plan.infl, 95);
+  const key = JSON.stringify([fp, stop, Math.round(pot), plan.g, plan.infl, plan.vol]);
+  const st = useDeferred(() => [0.9, 1, 1.1, 1.25].map(m => ({ m, r: bridgeStress(fp, stop, pot * m, plan.g, plan.infl, plan.vol, 95, 1200) })), key);
+  const mid = st ? st[1].r : null;
+  const rows = led.rows;
+  const taxTotal = rows.reduce((s, r) => s + r.tax, 0);
+  const firstPension = led.streams.length ? Math.min.apply(null, led.streams.map(x => x.startAge)) : null;
+  const hasPartner = rows.some(r => r.partner > 0);
+  const tip = o => {
+    if (!o || !o.active || !o.payload || !o.payload.length) return null;
+    const r = o.payload[0].payload;
+    return (
+      <div className="tipbox">
+        <div style={{fontWeight:700, marginBottom:3}}>Age {r.age}</div>
+        <div>Spend <b className="num">{fmt0(r.spend)}</b></div>
+        <div>From the pot <b className="num">{fmt0(r.fromPot)}</b>{r.tax > 0 ? ' + ' + fmt0(r.tax) + ' tax' : ''}</div>
+        {r.occ > 0 && <div>Pensions <b className="num">{fmt0(r.occ)}</b></div>}
+        {r.partner > 0 && <div>Charlotte’s pensions <b className="num">{fmt0(r.partner)}</b></div>}
+        {r.aow > 0 && <div>AOW <b className="num">{fmt0(r.aow)}</b></div>}
+        {r.short > 0 && <div className="red">Short <b className="num">{fmt0(r.short)}</b></div>}
+        <div className="dim">Pot at the start of the year {fmt0(r.pot)}</div>
+      </div>
+    );
+  };
+  return (
+    <div className="card">
+      <div className="spread" style={{flexWrap:'wrap', gap:8}}>
+        <h2 style={{margin:0}}>🌉 The bridge · every year after you stop</h2>
+        <Seg value={basis} onChange={setBasis} options={[['need', 'With the pot the model asks'], ['have', 'With the pot I’d have']]}/>
+      </div>
+      <div className="sub mb">Stop at an age and follow the money to 95, in today’s €. The pot carries everything until the pensions arrive, then only what they leave open.</div>
+      <div className="row" style={{gap:12, alignItems:'center', flexWrap:'wrap'}}>
+        <span className="small muted">Stop at</span>
+        <span className="hero-num" style={{fontSize:26, minWidth:44}}>{stop}</span>
+        <input type="range" min={lo} max={hi} step={1} value={stop} onChange={e => setStop(parseInt(e.target.value, 10))} style={{flex:'1 1 200px', maxWidth:420}}/>
+        <span className="small num">pot at the start <b>{fmt0(pot)}</b>{basis === 'have' ? (have >= need ? <span className="green"> · {fmt0(have - need)} above what is needed</span> : <span className="red"> · {fmt0(need - have)} short of what is needed</span>) : ''}</span>
+      </div>
+      <div style={{width:'100%', height:280, marginTop:10}}>
+        <ResponsiveContainer>
+          <ComposedChart data={rows} margin={{top:8, right:4, left:4, bottom:0}} barCategoryGap={1}>
+            <CartesianGrid stroke="var(--rule)" strokeDasharray="3 3"/>
+            <XAxis dataKey="age" tick={{fontSize:11, fill:'var(--muted)'}}/>
+            <YAxis yAxisId="l" tickFormatter={kEur} tick={{fontSize:11, fill:'var(--muted)'}} width={50}/>
+            <YAxis yAxisId="r" orientation="right" tickFormatter={kEur} tick={{fontSize:11, fill:'var(--dim)'}} width={50}/>
+            <Tooltip content={tip}/>
+            <Bar yAxisId="l" dataKey="fromPot" stackId="i" fill="var(--blue)" animationDuration={700}/>
+            <Bar yAxisId="l" dataKey="tax" stackId="i" fill="var(--red)" fillOpacity={0.55} animationDuration={700}/>
+            <Bar yAxisId="l" dataKey="occ" stackId="i" fill="var(--green)" animationDuration={800} animationBegin={120}/>
+            <Bar yAxisId="l" dataKey="partner" stackId="i" fill="var(--orange)" animationDuration={800} animationBegin={180}/>
+            <Bar yAxisId="l" dataKey="aow" stackId="i" fill="var(--yellow)" animationDuration={900} animationBegin={240}/>
+            <Line yAxisId="l" type="stepAfter" dataKey="spend" stroke="var(--text)" strokeWidth={1.6} dot={false} animationDuration={900}/>
+            <Line yAxisId="r" type="monotone" dataKey="pot" stroke="var(--dim)" strokeWidth={1.8} strokeDasharray="2 3" dot={false} animationDuration={1200} animationBegin={300}/>
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="row small" style={{gap:14, flexWrap:'wrap', marginTop:4}}>
+        <span><i className="lg" style={{background:'var(--blue)'}}/>from the pot</span>
+        <span><i className="lg" style={{background:'var(--red)', opacity:.55}}/>tax on the pot</span>
+        <span><i className="lg" style={{background:'var(--green)'}}/>PME and old pots</span>
+        {hasPartner && <span><i className="lg" style={{background:'var(--orange)'}}/>Charlotte’s pensions</span>}
+        <span><i className="lg" style={{background:'var(--yellow)'}}/>AOW</span>
+        <span><i className="lg" style={{background:'var(--text)'}}/>spend</span>
+        <span><i className="lg" style={{background:'var(--dim)'}}/>pot left, right axis</span>
+      </div>
+      <div className="grid3 mt">
+        <div className="statbox big">
+          <div className="mono-lab">Lasts to 95 in</div>
+          {mid ? <div className="sv" style={{color: mid.success >= 85 ? 'var(--green)' : mid.success >= 60 ? 'var(--yellow)' : 'var(--red)'}}><CountUp value={mid.success} format={pct1}/></div> : <div className="sv dim">…</div>}
+          <div className="sub">of 1.200 market paths{mid && mid.earlyFail !== null ? ' · in a bad run empty near ' + Math.round(mid.earlyFail) : ''}</div>
+        </div>
+        <div className="statbox big">
+          <div className="mono-lab">On the expected path</div>
+          <div className="sv">{led.emptyAt !== null ? <span className="red">empty at {Math.round(led.emptyAt)}</span> : fmt0(led.endPot) + ' left'}</div>
+          <div className="sub">{led.emptyAt !== null ? 'the pot runs out before 95' : 'at 95, in today’s €'}</div>
+        </div>
+        <div className="statbox big">
+          <div className="mono-lab">Bridge length</div>
+          <div className="sv">{firstPension !== null && firstPension > stop ? Math.round(firstPension - stop) + ' yrs' : 'none'}</div>
+          <div className="sub">{firstPension !== null ? 'until the first pension at ' + firstPension : 'no pensions in this plan'} · {fmt0(taxTotal)} tax on the pot over the whole stretch</div>
+        </div>
+      </div>
+      {st && <div className="mt reveal-in">
+        <div className="mono-lab" style={{marginBottom:5}}>How much margin buys how much certainty</div>
+        <div className="marginrow">
+          {st.map(x => (
+            <div key={x.m} className={'margincell' + (x.m === 1 ? ' on' : '')}>
+              <div className="mono-lab">{x.m === 1 ? 'this pot' : (x.m > 1 ? '+' : '−') + Math.round(Math.abs(x.m - 1) * 100) + '%'}</div>
+              <div className="num" style={{fontWeight:700}}>{fmt0(pot * x.m)}</div>
+              <div className="oddsbar"><div className="growbar" style={{width: Math.max(1, x.r.success) + '%', background: x.r.success >= 85 ? 'var(--green)' : x.r.success >= 60 ? 'var(--yellow)' : 'var(--red)'}}/></div>
+              <div className="num small">{pct1(x.r.success)}</div>
+            </div>
+          ))}
+        </div>
+      </div>}
+      <div className="sub mt">The model’s own pot assumes steady growth, capped at the withdrawal rate. This check throws real market swings at the same years. {mid ? (mid.success >= 85 ? 'The margin holds.' : 'Below about 85% the bridge leans too hard on good early years. More pot, a later stop, or a few years of spend held in cash at the start all lift it.') : ''}</div>
+    </div>
+  );
+}
+
+/* ---- Levers: what moves the FI date most ---- */
+function LeversCard({ plan, data, setData }){
+  const fp = plan.fp, root = (data && data.fireParams) || {};
+  const promo = root.promoInvest != null ? Number(root.promoInvest) || 0 : 300;
+  const addM = (f, x) => ({ ...f, monthlyContribution: (Number(f.monthlyContribution) || 0) + x,
+    contributionSchedule: (f.contributionSchedule || []).map(s => ({ ...s, monthly: (Number(s.monthly) || 0) + x })) });
+  const base = simulate(plan.pot, fp, plan.g, plan.infl);
+  const me = plan.lens === 'sven', ours = plan.lens === 'ours';
+  const defs = [
+    { id:'inv', grp:0, label:'Invest €100 more a month', fp: addM(fp, 100) },
+    { id:'spend', grp:0, label:'Spend €100 less a month, for good', fp: { ...fp, annualWithdrawal: Math.max(0, (Number(fp.annualWithdrawal) || 0) - 1200) } },
+    { id:'lump', grp:0, label:'Put a one-off €5.000 in now', pot: plan.pot + 5000 },
+  ];
+  if (plan.lens !== 'charlotte' && promo > 0)
+    defs.unshift({ id:'promo', grp:0, label:'Promotion · invest €' + promo + ' of the raise each month', fp: addM(fp, promo), promo: true });
+  if (ours) defs.push({ id:'half', grp:0, label:'Both of you invest €100 more a month', fp: addM(fp, 200) });
+  defs.push({ id:'up', grp:1, label:'Markets return 1 point more', g: plan.g + 1 });
+  defs.push({ id:'down', grp:1, label:'Markets return 1 point less', g: plan.g - 1 });
+  defs.push({ id:'swr', grp:1, label:'A more careful 3,5% withdrawal rate', fp: { ...fp, swr: 3.5 } });
+  if (plan.lens !== 'charlotte'){
+    const op = fp.occPensions || {};
+    defs.push({ id:'pens', grp:1, label:'Pension funds pay out 20% less', fp: { ...fp, occPensions: { ...op, haircutPct: Math.min(100, (Number(op.haircutPct) || 0) + 20) },
+      extraStreams: (fp.extraStreams || []).map(x => ({ ...x, gross: x.gross * 0.8 })) } });
+  }
+  if (me && (Number(fp.housingSpend) || 0) > 0 && !fp.housingSolo)
+    defs.push({ id:'solo', grp:1, label:'You pay the whole mortgage alone', fp: { ...fp, housingSolo: true } });
+  const pctAt = s => s.fireNumber > 0 ? s.realAtTarget / s.fireNumber * 100 : 0;
+  const res = defs.map(d => {
+    const s = simulate(d.pot != null ? d.pot : plan.pot, d.fp || fp, d.g != null ? d.g : plan.g, plan.infl);
+    const months = (base.fireAgeX !== null && s.fireAgeX !== null) ? (base.fireAgeX - s.fireAgeX) * 12 : null;
+    return { ...d, s, months, dPct: pctAt(s) - pctAt(base) };
+  });
+  const useMonths = res.every(r => r.months !== null);
+  const val = r => useMonths ? r.months : r.dPct;
+  const max = Math.max.apply(null, res.map(r => Math.abs(val(r))).concat([0.001]));
+  const applyPromo = () => {
+    if (!setData || !(promo > 0)) return;
+    setData({ ...data, fireParams: { ...root, monthlyContribution: (Number(root.monthlyContribution) || 0) + promo,
+      contributionSchedule: (root.contributionSchedule || []).map(s => ({ ...s, monthly: (Number(s.monthly) || 0) + promo })), promoInvest: 0 } });
+  };
+  const group = g => res.filter(r => r.grp === g).sort((a, b) => Math.abs(val(b)) - Math.abs(val(a)));
+  const line = r => {
+    const v = val(r), good = v > 0.0001, flat = Math.abs(v) < (useMonths ? 0.5 : 0.05);
+    return (
+      <div key={r.id} className="lever">
+        <div className="lever-lab">{r.label}
+          {r.promo && setData && <button className="btn" style={{marginLeft:8, padding:'1px 9px', fontSize:11.5}} onClick={applyPromo} title="Raise the monthly investment in the plan by this amount">Add to my plan</button>}
+        </div>
+        <div className="lever-track"><div className="growbar lever-bar" style={{width: Math.max(1.5, Math.abs(v) / max * 100) + '%', background: flat ? 'var(--surface2)' : good ? 'var(--green)' : 'var(--red)'}}/></div>
+        <div className={'lever-val num ' + (flat ? 'dim' : good ? 'green' : 'red')}>
+          {flat ? 'no change' : useMonths ? spanTxt(v) + (good ? ' sooner' : ' later') : (good ? '+' : '−') + pct1(Math.abs(v)).replace('%', '') + ' pts at ' + fp.targetAge}
+        </div>
+      </div>
+    );
+  };
+  return (
+    <div className="card">
+      <h2>🎚 Levers · what moves the date</h2>
+      <div className="sub mb">{useMonths
+        ? 'Each line changes one thing and reruns the whole plan. Now FI lands at ' + ageYM(base.fireAgeX) + '.'
+        : 'FI falls outside the horizon on today’s plan, so each line shows how much closer it gets you by ' + fp.targetAge + ', in points of the pot you need.'}</div>
+      <div className="mono-lab" style={{margin:'4px 0 6px'}}>Yours to pull</div>
+      {group(0).map(line)}
+      {plan.lens !== 'charlotte' && setData &&
+        <div className="row small" style={{gap:8, margin:'8px 0 2px', flexWrap:'wrap', alignItems:'center'}}>
+          <span className="muted">Global Spares Manager, from December 2026. Of the net raise I would invest</span>
+          <NumInput value={promo} step={50} width={84} suffix="€/mnd" onChange={v => setData({ ...data, fireParams: { ...root, promoInvest: v } })}/>
+        </div>}
+      <div className="mono-lab" style={{margin:'14px 0 6px'}}>Not in your hands</div>
+      {group(1).map(line)}
+      <div className="sub mt">The top group is where effort pays. The bottom group is why the plan keeps a margin.</div>
+    </div>
+  );
+}
+
+/* ---- Box 3: one plan under three tax regimes ---- */
+function TaxCard({ plan, setFP }){
+  const fp = plan.fp, cur = box3Regime(fp);
+  const REG = [['plan', 'Cabinet plan', 'capital gains from 2028'], ['law', 'Today’s law', 'forfait kept forever'], ['none', 'No tax', 'the classic 4% sheet']];
+  const sims = REG.map(r => ({ r, s: simulate(plan.pot, { ...fp, box3Regime: r[0] }, plan.g, plan.infl) }));
+  const curSim = sims.filter(x => x.r[0] === cur)[0].s;
+  return (
+    <div className="card">
+      <h2>🏛 Box 3 · one plan, three tax futures</h2>
+      <div className="sub mb">Tax on the pot is part of the answer in both phases. While you build it slows growth, and after you stop it comes out of the same withdrawal that pays your life. Pick the future the model should use.</div>
+      <div className="grid3">
+        {sims.map(x => {
+          const on = x.r[0] === cur;
+          return (
+            <button key={x.r[0]} className={'regime' + (on ? ' on' : '')} onClick={() => setFP('box3Regime', x.r[0])}>
+              <div className="spread"><span style={{fontWeight:700}}>{x.r[1]}</span><span className="chip">{on ? 'in use' : 'use this'}</span></div>
+              <div className="small dim" style={{marginBottom:8}}>{x.r[2]}</div>
+              <div className="kv"><span className="k">FI at</span><span className="v">{x.s.fireAgeX !== null ? ageYM(x.s.fireAgeX) : 'beyond horizon'}</span></div>
+              <div className="kv"><span className="k">Pot to stop at {fp.targetAge}</span><span className="v">{fmt0(x.s.fireNumber)}</span></div>
+              <div className="kv"><span className="k">Pure FI, nothing leaned on</span><span className="v">{fmt0(x.s.fireFull)}</span></div>
+              <div className="kv"><span className="k">Pot at {fp.targetAge}, today’s €</span><span className="v">{fmt0(x.s.realAtTarget)}</span></div>
+            </button>
+          );
+        })}
+      </div>
+      <div className="form-grid mt">
+        <label className="fld">Dividend yield of the pot
+          <NumInput value={fp.box3DivYield != null ? fp.box3DivYield : 1.3} step={0.1} width={75} suffix="%" onChange={v => setFP('box3DivYield', v)}/></label>
+        <label className="fld">Share of each sale that is gain
+          <NumInput value={fp.box3GainShare != null ? fp.box3GainShare : 60} step={5} width={75} suffix="%" onChange={v => setFP('box3GainShare', v)}/></label>
+        <label className="row small" style={{gap:8, cursor:'pointer', alignSelf:'center'}}>
+          <input type="checkbox" checked={fp.box3Plan2027 !== false} onChange={e => setFP('box3Plan2027', e.target.checked)}/> 2027 as proposed, 7,87% above € 30.846</label>
+        <label className="row small" style={{gap:8, cursor:'pointer', alignSelf:'center'}}>
+          <input type="checkbox" checked={fp.taxInRetirement !== false} onChange={e => setFP('taxInRetirement', e.target.checked)}/> Count tax on the pot after stopping</label>
+      </div>
+      <div className="sub mt">Cabinet plan as known on {BOX3_PLAN.asOf}, not yet law. From 2028 shares, funds and bonds pay 36% on dividends each year and on gains only when sold, with € 1.000 of result free per person. For 2027 the cabinet wants the allowance down to € 30.846 and the forfait up to 7,87%. The Tweede Kamer votes on 12 November 2026 and the Eerste Kamer has to follow before the year ends. Whether pots already held get a fresh starting value in 2028 is not published, so the model assumes they do and that crypto follows shares. The straight line projects about {Math.round(curSim.gainAtTarget * 100)}% of your pot at {fp.targetAge} to be gain, which is what the share above should roughly match.</div>
+      {fp.taxInRetirement === false && <div className="sub" style={{color:'var(--red)'}}>Tax after stopping is switched off, so the FI numbers are the optimistic kind. Every euro you take out later still realises a taxable gain.</div>}
+    </div>
+  );
+}
+
+/* ---- Ours: the household as one plan ---- */
+function HouseholdFireView({ data, setData, setTab }){
+  const fp = data.fireParams || {};
+  const plan = planFor(data, 'ours');
+  const hf = plan.fp, sp = plan.spend;
+  const base = simulate(plan.pot, hf, plan.g, plan.infl);
+  const pure = simulate(plan.pot, noPensions(hf), plan.g, plan.infl);
+  const fiNumber = pure.fireFull;
+  const pctToFI = fiNumber > 0 ? Math.min(100, plan.pot / fiNumber * 100) : 0;
+  const coastToday = coastNeededToday(base.fireAtTarget, base.T, hf, plan.g, plan.infl);
+  const coastPct = fiNumber > 0 ? Math.min(100, coastToday / fiNumber * 100) : 0;
+  const isCoast = plan.pot >= coastToday;
+  const pMe = planFor(data, 'sven'), pCh = planFor(data, 'charlotte');
+  const sMe = simulate(pMe.pot, pMe.fp, pMe.g, pMe.infl), sCh = simulate(pCh.pot, pCh.fp, pCh.g, pCh.infl);
+  const tot = { sven: lensTotals({ ...data, assets: (data.assets || []).filter(a => (a.owner || 'sven') === 'sven'), liabilities: (data.liabilities || []).filter(l => (l.owner || 'sven') === 'sven') }, 'ours'),
+    charlotte: lensTotals({ ...data, assets: (data.assets || []).filter(a => a.owner === 'charlotte'), liabilities: (data.liabilities || []).filter(l => l.owner === 'charlotte') }, 'ours'),
+    joint: lensTotals({ ...data, assets: (data.assets || []).filter(a => a.owner === 'joint'), liabilities: (data.liabilities || []).filter(l => l.owner === 'joint') }, 'ours') };
+  const all = lensTotals(data, 'ours');
+  const TYPE = [['stocks', 'Stocks', 'var(--green)'], ['crypto', 'Crypto', 'var(--orange)'], ['savings', 'Savings', 'var(--gold)'], ['property', 'Property equity', 'var(--blue)']];
+  const partsOf = t => ({ stocks: t.cat('stocks'), crypto: t.cat('crypto'), savings: t.cat('savings'), property: Math.max(0, t.propEq) });
+  const people = [['sven', 'Sven'], ['charlotte', 'Charlotte'], ['joint', 'Joint']].map(p => ({ id: p[0], name: p[1], parts: partsOf(tot[p[0]]) }))
+    .map(p => ({ ...p, total: TYPE.reduce((s, t) => s + p.parts[t[0]], 0) })).filter(p => p.total > 0 || p.id !== 'joint');
+  const maxTotal = Math.max.apply(null, people.map(p => p.total).concat([1]));
+  const setFP = (k, v) => setData({ ...data, fireParams: { ...fp, [k]: v } });
+  const pen = fp.pension || {};
+  const setPen = (k, v) => setData({ ...data, fireParams: { ...fp, pension: { ...pen, charlotte: { ...(pen.charlotte || {}), [k]: v } } } });
+  const setPenTop = (k, v) => setData({ ...data, fireParams: { ...fp, pension: { ...pen, [k]: v } } });
+  const svenM = Number(fp.monthlyContribution) || 0, chM = Number(fp.charlotteContribution) || 0;
+  const incomeM = ((data.income || {}).sven || 0) + ((data.income || {}).charlotte || 0);
+  const chartRows = base.rows.filter(r => r.t <= Math.ceil(base.T) + 3);
+  const race = [['Me', sMe, pMe, 'var(--blue)'], ['Charlotte', sCh, pCh, 'var(--orange)'], ['Ours', base, plan, 'var(--green)']];
+  const raceMax = Math.max.apply(null, race.map(r => r[1].fireAgeX !== null ? r[1].fireAgeX : r[1].ax + r[1].rows.length - 1));
+  const raceMin = Math.min(sMe.ax, sCh.ax);
+  const sale = plan.sale;
+  return (
+    <div className="stack">
+      <div className="card hero-card">
+        <div className="spread" style={{flexWrap:'wrap', gap:8}}>
+          <h2 style={{margin:0}}>Financial independence · Ours</h2>
+          <span className="chip">both pots · both pensions · two Box 3 allowances</span>
+        </div>
+        <div className="sub mb">The household as one plan. Your numbers and Charlotte’s stay in their own views. This one only adds them up.</div>
+        <div className="grid3">
+          <div className="statbox big">
+            <div className="mono-lab">FI together at</div>
+            <div className="sv" style={{color:'var(--green)'}}>{base.fireAgeX !== null ? ageYM(base.fireAgeX) : 'beyond ' + Math.round(base.ax + base.rows.length - 1)}</div>
+            <div className="sub">{base.fireYear !== null ? 'in ' + base.fireYear + ' · needs ' + fmt0(base.targetAtFire) + ' in today’s €' : 'not within the horizon on today’s plan'}</div>
+          </div>
+          <div className="statbox big">
+            <div className="mono-lab">Pot to stop at {hf.targetAge}</div>
+            <div className="sv"><CountUp value={base.fireNumber} format={fmt0}/></div>
+            <div className="sub">with pensions · {fmt0(pure.fireFull)} with nothing leaned on</div>
+          </div>
+          <div className="statbox big">
+            <div className="mono-lab">Coast point</div>
+            <div className="sv">{isCoast ? <span className="green">Reached ✓</span> : (base.coastAgeX !== null ? 'age ' + ageYM(base.coastAgeX) : fmt0(coastToday))}</div>
+            <div className="sub">{isCoast ? 'growth alone carries you to ' + hf.targetAge : fmt0(Math.max(0, coastToday - plan.pot)) + ' to go, then investing becomes optional'}</div>
+          </div>
+        </div>
+        <div className="spread mt" style={{alignItems:'flex-end', flexWrap:'wrap', gap:8}}>
+          <div>
+            <div className="metric green" style={{marginBottom:0}}><CountUp value={pctToFI} format={pct1}/></div>
+            <div className="sub">of the {fmt0(fiNumber)} pure FI number · household spend carried by investments alone, tax on the pot included</div>
+          </div>
+          <div className="num muted">{fmt0(plan.pot)} / {fmt0(fiNumber)}</div>
+        </div>
+        <div className="track">
+          <div className="growbar shine" style={{position:'absolute', left:0, top:0, height:'100%', width: Math.min(100, Math.max(0, pctToFI)) + '%', background:'linear-gradient(90deg,#4A211C,#5E6B3B)', borderRadius:8}}/>
+          <div style={{position:'absolute', left: coastPct + '%', top:-5, height:24, width:2, background:'#B98A2E'}} title="Coast point"></div>
+        </div>
+        <div className="spread" style={{marginTop:6}}>
+          <span className="small dim">€0</span>
+          <span className="small" style={{color:'#B98A2E'}}>Coast · {fmt0(coastToday)}</span>
+          <span className="small dim">{fmt0(fiNumber)}</span>
+        </div>
+        <Milestones liquid={plan.pot} target={fiNumber} coast={coastToday}/>
+      </div>
+
+      <div className="card">
+        <h3>Three lenses, one finish line</h3>
+        <div className="sub mb">Each on its own basis. Me with your pensions, Charlotte on her pot alone, Ours with everything shared.</div>
+        {race.map(r => {
+          const s = r[1], x = s.fireAgeX !== null ? s.fireAgeX : null;
+          const w = x !== null ? (x - raceMin) / Math.max(1, raceMax - raceMin) * 100 : 100;
+          return (
+            <div key={r[0]} className="racerow">
+              <span className="race-lab">{r[0]}</span>
+              <div className="race-track"><div className="growbar race-bar" style={{width: Math.max(4, Math.min(100, w)) + '%', background: r[3], opacity: x === null ? .3 : .85}}/></div>
+              <span className="race-val num">{x !== null ? ageYM(x) : 'beyond horizon'}</span>
+              <span className="race-sub num dim">{fmt0(r[2].pot)} now · {fmt0((Number(r[2].fp.monthlyContribution) || 0))}/mo</span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="card">
+        <h3>Who holds what</h3>
+        <div className="sub mb">Property as equity, value minus its mortgage. Loans come off the net worth below.</div>
+        {people.map(p => (
+          <div key={p.id} style={{marginBottom:14}}>
+            <div className="spread" style={{marginBottom:4}}><span style={{fontWeight:700}}>{p.name}</span><span className="num" style={{fontWeight:700}}><CountUp value={p.total} format={fmt0}/></span></div>
+            <div className="growbar" style={{display:'flex', height:26, borderRadius:6, overflow:'hidden', width: Math.max(2, p.total / maxTotal * 100) + '%', background:'var(--surface2)'}}>
+              {TYPE.map(t => p.parts[t[0]] > 0 ? <div key={t[0]} title={t[1] + ' ' + fmt0(p.parts[t[0]])} style={{width: (p.parts[t[0]] / p.total * 100) + '%', background: t[2]}}/> : null)}
+            </div>
+          </div>
+        ))}
+        <div className="row" style={{gap:14, flexWrap:'wrap', marginTop:6}}>
+          {TYPE.map(t => <span key={t[0]} className="small"><i className="lg" style={{background: t[2]}}/>{t[1]}</span>)}
+        </div>
+        <div className="grid3 mt">
+          <div className="statbox"><div className="mono-lab">FI pot</div><div className="sv"><CountUp value={plan.pot} format={fmt0}/></div><div className="sub">{fmt0(all.liquid)} liquid in total</div></div>
+          <div className="statbox"><div className="mono-lab">Property equity</div><div className="sv"><CountUp value={all.propEq} format={fmt0}/></div><div className="sub">{fmt0(all.propVal)} value</div></div>
+          <div className="statbox"><div className="mono-lab">Household net worth</div><div className="sv"><CountUp value={all.netWorth} format={fmt0}/></div><div className="sub">{all.loans > 0 ? fmt0(all.loans) + ' loans taken off' : 'no loans'}</div></div>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>The household plan</h2>
+        <div className="grid2">
+          <div>
+            <h4 style={{margin:'0 0 6px'}}>What life costs a year</h4>
+            <div className="kv"><span className="k">Sven, core <span className="dim small">from the Me view</span></span><span className="v">{fmt0(sp.svenCore)}</span></div>
+            <div className="kv"><span className="k">Charlotte, core <span className="dim small">joint share plus personal{plan.ch && sp.chCore < plan.ch.spendY ? ', without her mortgage half' : ''}</span></span><span className="v">{fmt0(sp.chCore)}</span></div>
+            <div className="kv"><span className="k">Mortgage, both halves <span className="dim small">fixed payment until {fp.housingEndYear || 2054}</span></span><span className="v">{fmt0(sp.mortgageY)}</span></div>
+            <div className="kv" style={{borderTop:'1px solid var(--surface2)', paddingTop:6}}><span className="k" style={{fontWeight:700}}>Household spend</span><span className="v" style={{fontWeight:800}}>{fmt0(sp.total)}</span></div>
+            <div className="kv"><span className="k">Or set one figure <span className="dim small">0 follows the two views</span></span><span className="v"><NumInput value={fp.householdSpend || 0} step={500} width={100} onChange={v => setFP('householdSpend', v)}/></span></div>
+            {sp.override && <div className="sub">Using your own figure. The two views add up to {fmt0(sp.derived)}.</div>}
+            <div className="kv"><span className="k">Stop age for both</span><span className="v"><NumInput value={fp.targetAge} step={1} width={60} onChange={v => setFP('targetAge', v)}/></span></div>
+          </div>
+          <div>
+            <h4 style={{margin:'0 0 6px'}}>What goes in</h4>
+            <div className="kv"><span className="k">Sven invests / mo</span><span className="v"><NumInput value={svenM} step={50} width={90} onChange={v => setFP('monthlyContribution', v)}/></span></div>
+            <div className="kv"><span className="k">Charlotte invests / mo</span><span className="v"><NumInput value={chM} step={50} width={90} onChange={v => setFP('charlotteContribution', v)}/></span></div>
+            {incomeM > 0 && <div className="kv"><span className="k">Investing rate <span className="dim small">of {fmt0(incomeM)} take-home</span></span><span className="v">{pct1(Math.min(100, (svenM + chM) / incomeM * 100))}</span></div>}
+            {hf.contributionSchedule.map((s, i) => <div key={i} className="kv"><span className="k dim">From age {ageYM(s.fromAge)}</span><span className="v dim">{fmt0(s.monthly)}/mo together</span></div>)}
+            {plan.lumps.map((l, i) => <div key={i} className="kv"><span className="k">🇬🇧 {l.label} {l.year} <span className="dim small">the part she invests</span></span><span className="v green">{fmt0(l.amount)}</span></div>)}
+            {sale && sale.active && sale.cgt === null && <div className="sub" style={{color:'var(--gold)'}}>Before UK capital gains tax. Add the flat’s purchase price and date in the Charlotte view.</div>}
+            {sale && sale.active && sale.toHome > 0 && <div className="kv"><span className="k dim">Kept for a joint home <span className="small">outside the pot</span></span><span className="v dim">{fmt0(sale.toHome)}</span></div>}
+            {!(chM > 0) && <div className="sub">Charlotte invests €0 a month in the plan. Her start plan in the Charlotte view proposes {fmt0(plan.ch.invest)}.</div>}
+          </div>
+        </div>
+        <h4 style={{margin:'16px 0 6px'}}>Pensions the household leans on</h4>
+        <div className="grid2">
+          <div>
+            <div style={{fontWeight:700, marginBottom:4}}>Sven</div>
+            <div className="sub">From the Me view. AOW{fp.aowEnabled ? ' from ' + fp.aowAge : ' off'}, PME and old pots as kept at the stop age.</div>
+            <div className="kv"><span className="k">Stopping at {hf.targetAge}, bruto</span><span className="v">{fmt0(pensionStreamsFor(fp, hf.targetAge).reduce((t, x) => t + x.gross, 0))}/yr</span></div>
+          </div>
+          <div>
+            <div style={{fontWeight:700, marginBottom:4}}>Charlotte <span className="dim small">· rough until her overview is in</span></div>
+            <div className="kv"><span className="k">State pensions and locked pots, net</span><span className="v"><NumInput value={(pen.charlotte || {}).safeNet || 0} step={25} width={90} suffix="/mnd" onChange={v => setPen('safeNet', v)}/></span></div>
+            <div className="kv"><span className="k">Current employer if she works on, net</span><span className="v"><NumInput value={(pen.charlotte || {}).employerNet || 0} step={50} width={90} suffix="/mnd" onChange={v => setPen('employerNet', v)}/></span></div>
+            <div className="kv"><span className="k">Share kept when stopping early</span><span className="v"><NumInput value={pen.accrualFactor != null ? pen.accrualFactor : 60} step={5} width={64} suffix="%" onChange={v => setPenTop('accrualFactor', v)}/></span></div>
+            <div className="kv"><span className="k">Paid from age</span><span className="v"><NumInput value={plan.pStart} step={1} width={60} onChange={v => setPenTop('startAge', v)}/></span></div>
+            <div className="kv"><span className="k">Counts as</span><span className="v green">{fmt0(plan.chPensionNet)}/yr</span></div>
+          </div>
+        </div>
+        <label className="row small mt" style={{gap:8, cursor:'pointer'}}>
+          <input type="checkbox" checked={pen.enabled !== false} onChange={e => setPenTop('enabled', e.target.checked)}/> Count Charlotte’s pensions in the household plan</label>
+        <div className="sub mt">Her London flat is equity, not income. When it is sold the part she invests enters the pot in that year, and the part kept for a joint home stays outside it. Buying together is a separate decision, because the Dutch mortgage ceiling follows income and the sale money only raises your own capital.</div>
+      </div>
+
+      {chartRows.length > 1 &&
+        <div className="card">
+          <h3>Household pot against the pot needed to stop <span className="dim small">(today’s €)</span></h3>
+          <div style={{width:'100%', height:260}}>
+            <ResponsiveContainer>
+              <ComposedChart data={chartRows} margin={{top:8, right:12, left:4, bottom:0}}>
+                <defs><linearGradient id="hhg2" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--green)" stopOpacity={0.5}/><stop offset="100%" stopColor="var(--green)" stopOpacity={0.04}/>
+                </linearGradient></defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--rule)"/>
+                <XAxis dataKey="age" tick={{fontSize:11, fill:'var(--muted)'}}/>
+                <YAxis tickFormatter={kEur} tick={{fontSize:11, fill:'var(--muted)'}} width={52}/>
+                <Tooltip formatter={(v, n) => [fmt0(v), n]} labelFormatter={a => 'Age ' + a}/>
+                <Area animationDuration={900} type="monotone" dataKey="real" name="Household pot" stroke="var(--green)" strokeWidth={2} fill="url(#hhg2)"/>
+                <Line animationDuration={1100} animationBegin={200} type="monotone" dataKey="needReal" name="Needed to stop at that age" stroke="var(--red)" strokeWidth={1.6} strokeDasharray="5 4" dot={false}/>
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="sub">The red line falls with age because every year you work on shortens the bridge and adds pension. Where the two cross is the household FI date.</div>
+        </div>}
+
+      <OddsCard plan={plan} setFP={setFP}/>
+      <BridgeCard plan={plan} sim={base}/>
+      <LeversCard plan={plan} data={data} setData={setData}/>
+      <TaxCard plan={plan} setFP={setFP}/>
     </div>
   );
 }
@@ -2186,9 +3114,11 @@ function OccPensionEditor({ data, setData, fp, stopAge }){
 }
 
 function FireTab({ data, setData, lens = 'sven', setTab }){
+  if (lens === 'ours') return <HouseholdFireView data={data} setData={setData} setTab={setTab}/>;
   if (lens !== 'sven') return <PeopleFireView data={data} setData={setData} lens={lens} setTab={setTab}/>;
   const fp = data.fireParams;
-  const liquid = investableOf(data.assets.filter(a => lensMatch(a.owner, lens)));   // FI pot: savings pots excluded unless ticked
+  const plan = planFor(data, 'sven');
+  const liquid = plan.pot;                                      // FI pot: savings pots excluded unless ticked, joint items for your share
 
   const setFP = (k, v) => setData({ ...data, fireParams: { ...fp, [k]: v } });
   const sched = fp.contributionSchedule || [];
@@ -2216,7 +3146,7 @@ function FireTab({ data, setData, lens = 'sven', setTab }){
   const credAtStop = base.pensionCreditAtFire !== null ? base.pensionCreditAtFire : base.pensionCredit;
 
   const fiNumber = pure.fireFull;                              // nothing leaned on, stopping at target age, today's money
-  const yearsToTarget = Math.max(base.targetYear - base.startYear, 0);
+  const yearsToTarget = base.T;
   const coastNumberToday = coastNeededToday(base.fireAtTarget, yearsToTarget, fp, fp.grossReturn, fp.inflation);
   const pctToFI = fiNumber > 0 ? liquid / fiNumber * 100 : 0;
   const coastPct = fiNumber > 0 ? Math.min(100, coastNumberToday / fiNumber * 100) : 0;
@@ -2244,12 +3174,12 @@ function FireTab({ data, setData, lens = 'sven', setTab }){
         <div className="spread" style={{alignItems:'flex-end', flexWrap:'wrap', gap:8}}>
           <div>
             <div className="metric green" style={{marginBottom:0}}><CountUp value={pctToFI} format={pct1}/></div>
-            <div className="sub">of your {fmt0(fiNumber)} FI number · core spend × {Math.round(1/(fp.swr/100))}{(fp.housingSpend || 0) > 0 ? ' plus your mortgage share until ' + fp.housingEndYear : ''}, stopping at {fp.targetAge}, investments only</div>
+            <div className="sub">of your {fmt0(fiNumber)} pure FI number · investments alone carrying your core spend{(fp.housingSpend || 0) > 0 ? ' plus your mortgage share until ' + fp.housingEndYear : ''}, stopping at {fp.targetAge}{box3Regime(fp) !== 'none' && fp.taxInRetirement !== false ? ', tax on the pot included' : ''}</div>
           </div>
           <div className="num muted">{fmt0(liquid)} / {fmt0(fiNumber)}</div>
         </div>
         <div style={{position:'relative', height:14, background:'var(--bg)', borderRadius:8, marginTop:14}}>
-          <div className="growbar" style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
+          <div className="growbar shine" style={{position:'absolute', left:0, top:0, height:'100%', width:Math.min(100,Math.max(0,pctToFI))+'%',
             background:'linear-gradient(90deg,#4A211C,#5E6B3B)', borderRadius:8, transition:'width .4s'}}/>
           <div style={{position:'absolute', left:coastPct+'%', top:-5, height:24, width:2, background:'#B98A2E'}} title={'Coast point: enough to reach your target at ' + fp.targetAge + ' on growth alone'}></div>
         </div>
@@ -2267,7 +3197,7 @@ function FireTab({ data, setData, lens = 'sven', setTab }){
             <h3>🪂 Coast FIRE</h3>
             {isCoast
               ? <div className="big green">Reached ✓</div>
-              : <div className="big num">{base.coastAge !== null ? 'Age ' + base.coastAge : '—'}</div>}
+              : <div className="big num">{base.coastAgeX !== null ? 'Age ' + ageYM(base.coastAgeX) : '—'}</div>}
             <div className="sub">{isCoast
               ? 'You could stop investing today and still reach your target by ' + fp.targetAge + ' on growth alone, as long as you keep working until then.'
               : (base.coastYear ? 'On track to coast in ' + base.coastYear + '. After that, growth alone gets you to ' + fp.targetAge + (pensOn ? ' (pensions included).' : '.')
@@ -2276,7 +3206,7 @@ function FireTab({ data, setData, lens = 'sven', setTab }){
           </div>
           <div className="card" style={{background:'var(--bg)'}}>
             <h3>🎯 Full FIRE</h3>
-            <div className="big num">{base.fireAge !== null ? 'Age ' + base.fireAge : '> horizon'}</div>
+            <div className="big num">{base.fireAgeX !== null ? 'Age ' + ageYM(base.fireAgeX) : '> horizon'}</div>
             <div className="sub">{base.yearsToFire !== null
               ? base.yearsToFire + ' years to go · projected ' + base.fireYear + ' · needs ' + fmt0(base.targetAtFire) + ' in today’s €'
               : 'Not reached within the horizon at the current plan.'}</div>
@@ -2322,7 +3252,7 @@ function FireTab({ data, setData, lens = 'sven', setTab }){
           <span className="k">Stress test · you pay the whole mortgage alone <span className="muted small">· doubles the mortgage share until {fp.housingEndYear || 2054}</span></span>
         </label>
         <div className="sub" style={{marginTop:8}}>Spend from your Jul to Sep 2026 accounts: about € 2.750/mnd, of which € 528 is your half of the mortgage. Core spend leaves out the mortgage and the DUO loan (paid off around 2032). The mortgage share is a fixed payment, so it shrinks in today’s money and stops after {fp.housingEndYear || 2054}. The reserve is extra pot you still hold when the last pension starts, because from then on everything leans on pensions.</div>
-        <div className="sub" style={{marginTop:8}}>Box 3 in 2026 · allowance € 59.357 per person, € 118.714 for two fiscal partners together (shared with the partner’s own box 3 assets) · fictitious return on investments 6,00% · rate 36%. The projection indexes the allowance with inflation every year.</div>
+        <div className="sub" style={{marginTop:8}}>Box 3 in 2026 · allowance € 59.357 per person, € 118.714 for two fiscal partners together (shared with the partner’s own box 3 assets) · fictitious return on investments 6,00% · rate 36%. These three fields describe today’s law. Which rules the projection follows from 2027 on is set in the Box 3 card further down.</div>
 
         <div className="mt" style={{borderTop:'1px solid var(--surface2)', paddingTop:14}}>
           <label className="row" style={{gap:10, alignItems:'center', cursor:'pointer'}}>
@@ -2380,6 +3310,8 @@ function FireTab({ data, setData, lens = 'sven', setTab }){
         <Scen s={opt}  label="🟢 Best case" cls="opt"  gross={9} infl={2}/>
       </div>
 
+      <OddsCard plan={plan} setFP={setFP}/>
+
       <div className="card">
         <h2>Portfolio growth — nominal vs inflation-adjusted</h2>
         <div style={{width:'100%', height:300}}>
@@ -2421,6 +3353,10 @@ function FireTab({ data, setData, lens = 'sven', setTab }){
         <div className="sub">After ~10 years the green (compounding) should dominate the blue — that's the FIRE flywheel.</div>
       </div>
 
+      <BridgeCard plan={plan} sim={base}/>
+      <LeversCard plan={plan} data={data} setData={setData}/>
+      <TaxCard plan={plan} setFP={setFP}/>
+
       <div className="grid3">
         <div className="card">
           <h3>Pot needed to stop {pensOn && <span className="dim small">(pension-reduced)</span>}</h3>
@@ -2432,7 +3368,7 @@ function FireTab({ data, setData, lens = 'sven', setTab }){
         <div className="card">
           <h3>Years remaining</h3>
           <div className="metric">{base.yearsToFire !== null ? base.yearsToFire : '—'}</div>
-          <div className="sub">{base.fireYear ? 'FIRE in ' + base.fireYear + ' at age ' + base.fireAge : 'Not reached within horizon'}</div>
+          <div className="sub">{base.fireYear ? 'FIRE in ' + base.fireYear + ' at age ' + ageYM(base.fireAgeX) : 'Not reached within horizon'}</div>
         </div>
         <div className="card">
           <h3>To hit age {fp.targetAge} exactly</h3>
@@ -2554,10 +3490,8 @@ function BudgetTab({ data, setData, lens = 'sven' }){
   const totalVar = monthExpenses.reduce((s,t) => s + Math.abs(t.amount), 0);
   const importedIncome = monthIncomeTx.reduce((s,t) => s + t.amount, 0);
 
-  let totalFixed, totalIn;
-  if (lens === 'charlotte'){ totalFixed = contribEach; totalIn = income.charlotte || 0; }
-  else if (lens === 'ours'){ totalFixed = sharedTotal + personalFixed; totalIn = (income.sven || 0) + (income.charlotte || 0); }
-  else { totalFixed = contribEach + personalFixed; totalIn = income.sven || 0; }
+  const mb = monthBudget(data, lens, mk);
+  const totalFixed = mb.totalFixed, totalIn = mb.totalIn;
   const visibleFixed = lens === 'ours' ? (data.fixedCosts || []) : personalItems;
   const visibleFixedTotal = visibleFixed.reduce((s,c) => s + monthlyEq(c), 0);
 
@@ -2690,7 +3624,7 @@ function BudgetTab({ data, setData, lens = 'sven' }){
           <h2 style={{margin:0}}>Joint account · shared costs</h2>
           <span className="badge badge-blue num">{fmt(sharedTotal)}/mnd</span>
         </div>
-        <div className="sub" style={{marginTop:-4, marginBottom:8}}>You each pay {fmt(contribEach)} into the joint Revolut at month-end; the fixed shared costs below come out of it.</div>
+        <div className="sub" style={{marginTop:-4, marginBottom:8}}>You each pay {fmt(contribEach)} into the joint account at month-end; the fixed shared costs below come out of it.</div>
         <table>
           <thead><tr><th>Cost</th><th className="r">Total</th><th className="r">Each ({split}/{100 - split})</th></tr></thead>
           <tbody>
@@ -2898,13 +3832,17 @@ function BudgetTab({ data, setData, lens = 'sven' }){
           <React.Fragment>
             <div className="kv"><span className="k">Household income</span><span className="v">{fmt(totalIn)}</span></div>
             <div className="kv"><span className="k">Shared costs</span><span className="v">−{fmt(sharedTotal)}</span></div>
-            <div className="kv"><span className="k">Sven personal fixed</span><span className="v">−{fmt(personalFixed)}</span></div>
+            <div className="kv"><span className="k">Sven personal fixed</span><span className="v">−{fmt(mb.svenPF)}</span></div>
+            {(mb.chPF + mb.jointPF) > 0 && <div className="kv"><span className="k">Charlotte and joint personal fixed</span><span className="v">−{fmt(mb.chPF + mb.jointPF)}</span></div>}
+            {mb.chEst > 0 && <div className="kv"><span className="k">Charlotte personal spending <span className="dim small">from her profile, until her own transactions show it</span></span><span className="v">−{fmt(mb.chEst)}</span></div>}
             <div className="kv"><span className="k">Variable (this month)</span><span className="v">−{fmt(totalVar)}</span></div>
           </React.Fragment>
         ) : lens === 'charlotte' ? (
           <React.Fragment>
             <div className="kv"><span className="k">Charlotte income</span><span className="v">{fmt(totalIn)}</span></div>
             <div className="kv"><span className="k">Joint contribution</span><span className="v">−{fmt(contribEach)}</span></div>
+            {mb.chPF > 0 && <div className="kv"><span className="k">Personal fixed</span><span className="v">−{fmt(mb.chPF)}</span></div>}
+            {mb.chEst > 0 && <div className="kv"><span className="k">Personal spending <span className="dim small">from her profile, not yet logged</span></span><span className="v">−{fmt(mb.chEst)}</span></div>}
             <div className="kv"><span className="k">Variable (this month)</span><span className="v">−{fmt(totalVar)}</span></div>
           </React.Fragment>
         ) : (
@@ -2924,7 +3862,7 @@ function BudgetTab({ data, setData, lens = 'sven' }){
         <div className="sub mt">{lens === 'charlotte'
           ? 'Charlotte just started work — treat her take-home as provisional for a few months.'
           : lens === 'ours'
-            ? 'Household: both incomes minus shared costs, Sven\u2019s personal costs and variable spend. The joint buffer stays in Revolut.'
+            ? 'Household: both incomes minus shared costs, each person’s own costs and variable spend. The joint buffer stays in the joint account.'
             : 'Your view: income minus your joint contribution, personal fixed costs and variable spend.'}</div>
       </div>
 
@@ -2945,6 +3883,128 @@ function lensMatch(owner, lens){
   if (lens === 'sven') return owner === 'sven' || owner === 'joint';
   if (lens === 'charlotte') return owner === 'charlotte' || owner === 'joint';
   return true;
+}
+
+/* ---- lens arithmetic. A joint asset or debt belongs to both, so a personal lens counts its share
+   (the household split, 50/50 unless changed) and Ours counts all of it. ---- */
+function lensShare(owner, lens, data){
+  owner = owner || 'sven';
+  if (!lens || lens === 'ours') return 1;
+  if (owner === lens) return 1;
+  if (owner !== 'joint') return 0;
+  const hh = (data && data.household) || {};
+  const s = hh.sharedSplit != null ? Number(hh.sharedSplit) : 50;     // Sven's %
+  return Math.min(100, Math.max(0, lens === 'sven' ? s : 100 - s)) / 100;
+}
+/* Items as a lens counts them. Only for totals, never for rows that get edited. */
+function lensItems(list, lens, data){
+  const out = [];
+  (list || []).forEach(x => {
+    const sh = lensShare(x.owner, lens, data);
+    if (sh >= 1) out.push(x);
+    else if (sh > 0) out.push({ ...x, value: (x.value || 0) * sh, fxAmount: x.fxAmount != null ? x.fxAmount * sh : x.fxAmount, _share: sh });
+  });
+  return out;
+}
+function lensTotals(data, lens){
+  const A = lensItems(data.assets, lens, data), L = lensItems(data.liabilities, lens, data);
+  const cat = c => A.filter(a => a.category === c).reduce((s, a) => s + (a.value || 0), 0);
+  const debt = L.reduce((s, l) => s + (l.value || 0), 0);
+  const loans = L.filter(l => !isPropDebt(l)).reduce((s, l) => s + (l.value || 0), 0);
+  const liquid = cat('stocks') + cat('crypto') + cat('savings');
+  const propVal = cat('property'), propEq = propVal - (debt - loans);
+  return { A, L, cat, gross: A.reduce((s, a) => s + (a.value || 0), 0), debt, loans, liquid, savings: cat('savings'),
+    fiPot: investableOf(A), propVal, propDebt: debt - loans, propEq, netWorth: liquid + propEq - loans };
+}
+/* A snapshot the way one lens sees it. Snapshots saved before v56 only hold household totals. */
+function snapFor(s, lens){
+  if (!s) return null;
+  if (!lens || lens === 'ours') return s;
+  const b = s.by && s.by[lens];
+  if (b) return { ...s, liquidNW: b.liquidNW, savings: b.savings, propertyEquity: b.propertyEquity, netWorth: b.netWorth,
+    fiPot: b.fiPot, monthlyInvest: b.monthlyInvest != null ? b.monthlyInvest : s.monthlyInvest };
+  return lens === 'sven' ? { ...s, legacy: true } : null;
+}
+function snapParts(data){
+  const r2 = v => Math.round(v * 100) / 100, fp = data.fireParams || {};
+  const one = (lens, invest) => { const t = lensTotals(data, lens);
+    return { liquidNW: r2(t.liquid), savings: r2(t.savings), propertyEquity: r2(t.propEq), netWorth: r2(t.netWorth), fiPot: r2(t.fiPot), monthlyInvest: invest }; };
+  return { sven: one('sven', Number(fp.monthlyContribution) || 0), charlotte: one('charlotte', Number(fp.charlotteContribution) || 0) };
+}
+
+/* This month's money for a lens. One source for the Budget tab, the dashboard and Goals, so they agree.
+   Charlotte's personal spending comes from her profile until her own transactions replace it. */
+function monthBudget(data, lens, mk){
+  const fp = data.fireParams || {}, income = data.income || {}, hh = data.household || {};
+  const contribEach = hh.jointContribEach != null ? hh.jointContribEach : 1000;
+  const fc = data.fixedCosts || [];
+  const own = c => c.owner || 'sven';
+  const sharedTotal = fc.filter(c => c.shared).reduce((s, c) => s + monthlyEq(c), 0);
+  const pf = who => fc.filter(c => !c.shared && own(c) === who).reduce((s, c) => s + monthlyEq(c), 0);
+  const svenPF = pf('sven'), chPF = pf('charlotte'), jointPF = pf('joint');
+  const monthTx = (data.transactions || []).filter(t => t.date.slice(0, 7) === mk && !t.isTransfer && lensMatch(t.account, lens));
+  const isVar = t => t.amount < 0 && catOf(data, t.categoryId).type === 'variable';
+  const totalVar = monthTx.filter(isVar).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const chVar = (data.transactions || []).filter(t => t.date.slice(0, 7) === mk && !t.isTransfer && t.account === 'charlotte' && isVar(t))
+    .reduce((s, t) => s + Math.abs(t.amount), 0);
+  const chPersonal = Math.max(0, Number(chProfile(fp).personalSpendM) || 0);
+  const chEst = Math.max(0, chPersonal - chPF - chVar);          // the part of her personal spending not yet visible
+  let totalFixed, totalIn, personalFixed;
+  if (lens === 'charlotte'){ personalFixed = chPF; totalFixed = contribEach + chPF + chEst; totalIn = income.charlotte || 0; }
+  else if (lens === 'ours'){ personalFixed = svenPF + chPF + jointPF; totalFixed = sharedTotal + personalFixed + chEst; totalIn = (income.sven || 0) + (income.charlotte || 0); }
+  else { personalFixed = svenPF; totalFixed = contribEach + svenPF; totalIn = income.sven || 0; }
+  const surplus = totalIn - (totalFixed + totalVar);
+  return { contribEach, sharedTotal, svenPF, chPF, jointPF, chEst, chPersonal, personalFixed, totalFixed, totalIn, totalVar, monthTx,
+    surplus, savingsRate: totalIn > 0 ? surplus / totalIn * 100 : 0 };
+}
+
+/* The projection inputs for a lens. Me is the plan as entered. Charlotte is her own spend, age and
+   money. Ours is one household: both pots, both contributions, both pensions, two Box 3 allowances,
+   and the whole mortgage until it ends. Nothing here writes back, so the lenses stay separate. */
+function planFor(data, lens){
+  const fp = data.fireParams || {};
+  const A = lensItems(data.assets, lens, data);
+  const pot = investableOf(A);
+  const g = Number(fp.grossReturn) || 0, infl = fp.inflation != null ? Number(fp.inflation) : 2.5;
+  const vol = Number(fp.mcVol) > 0 ? Number(fp.mcVol) : potVolatility(A);
+  if (!lens || lens === 'sven')
+    return { lens:'sven', who:'Sven', fp, pot, A, g, infl, vol, spendTotal: (Number(fp.annualWithdrawal) || 0) + (Number(fp.housingSpend) || 0) * (fp.housingSolo ? 2 : 1) };
+  const ch = charlottePlan(data), sale = chSale(data), step = chStepUp(data, ch, sale);
+  const chContrib = Number(fp.charlotteContribution) || 0;
+  const lumps = (sale && sale.active && sale.toInvest > 0)
+    ? [{ year: sale.saleYear, when: sale.saleYear + (sale.saleMonth - 0.5) / 12, amount: sale.toInvest, label:'London flat sale' }] : [];
+  const h = Number(fp.housingSpend) || 0;                        // one half of the mortgage payment, a year
+  const chPaysHalf = h > 0 && !fp.housingSolo && ch.joint * 12 >= h;
+  const chCore = chPaysHalf ? ch.spendY - h : ch.spendY;         // her spend without the mortgage half inside her joint share
+  if (lens === 'charlotte'){
+    const chAx = exactAge(ch.cp.birthYear, ch.cp.birthMD);
+    const fpC = { ...fp, birthYear: ch.cp.birthYear, birthMD: ch.cp.birthMD, targetAge: ch.cp.targetAge,
+      monthlyContribution: chContrib, contributionSchedule: step ? [{ fromAge: chAx + step.years, monthly: step.monthly }] : [],
+      annualWithdrawal: chCore, housingSpend: chPaysHalf ? h : 0, housingSolo: false, reserveYears: 0,
+      aowEnabled: false, occPensions: { enabled:false, streams:[] }, extraStreams: [], lumpSums: lumps, box3Persons: 1 };
+    return { lens, who:'Charlotte', fp: fpC, pot, A, g, infl, vol, ch, sale, step, lumps, spendTotal: ch.spendY, chPaysHalf };
+  }
+  const ax = exactAge(fp.birthYear, fp.birthMD);
+  const svenCore = Number(fp.annualWithdrawal) || 0, mortgageY = h * 2;
+  const derived = svenCore + chCore + mortgageY;
+  const override = Number(fp.householdSpend) > 0 ? Number(fp.householdSpend) : 0;
+  const core = override ? Math.max(0, override - mortgageY) : svenCore + chCore;
+  const stepAge = step ? ax + step.years : null;
+  const chAt = a => (step && a >= stepAge - 1e-9) ? step.monthly : chContrib;
+  const pts = (fp.contributionSchedule || []).map(s => Number(s.fromAge)).concat(step ? [stepAge] : []).sort((a, b) => a - b);
+  const sched = pts.map(a => ({ fromAge: a, monthly: contribAtAge(fp, a) + chAt(a) }));
+  const pen = fp.pension || {}, pc = pen.charlotte || {};
+  const factor = (pen.accrualFactor != null ? pen.accrualFactor : 60) / 100;
+  const pStart = Number(pen.startAge) || 70;
+  const extra = pen.enabled === false ? [] : [
+    { kind:'partner', startAge: pStart, indexed: true, isNet: true, gross: (Number(pc.safeNet) || 0) * 12 },
+    { kind:'partner', startAge: pStart, indexed: true, isNet: true, gross: (Number(pc.employerNet) || 0) * 12 * factor }];
+  const fpH = { ...fp, annualWithdrawal: core, housingSpend: mortgageY, housingSolo: false,
+    monthlyContribution: (Number(fp.monthlyContribution) || 0) + chContrib, contributionSchedule: sched,
+    lumpSums: (fp.lumpSums || []).concat(lumps), extraStreams: extra, box3Persons: 2 };
+  return { lens:'ours', who:'Household', fp: fpH, pot, A, g, infl, vol, ch, sale, step, lumps, spendTotal: core + mortgageY,
+    spend: { svenCore, chCore, mortgageY, core, total: core + mortgageY, override: override > 0, derived },
+    chPensionNet: extra.reduce((s, x) => s + x.gross, 0), pStart };
 }
 
 /* ---- holding icons: real coin / brand logos with a warm monogram fallback ---- */
@@ -3988,29 +5048,36 @@ function monthsBetween(d1, d2){
 
 function HistoryTab({ data, setData, lens = 'sven' }){
   const fileRef = useRef(null);
-  const snaps = [...(data.snapshots||[])].sort((a,b) => a.date.localeCompare(b.date));
+  const allSnaps = [...(data.snapshots||[])].sort((a,b) => a.date.localeCompare(b.date));
+  /* each lens reads its own slice of a snapshot; snapshots from before v56 only hold household totals */
+  const snaps = allSnaps.map(s => snapFor(s, lens)).filter(Boolean);
+  const legacyN = snaps.filter(s => s.legacy).length;
+  const hiddenN = allSnaps.length - snaps.length;
 
-  const sumCat = c => data.assets.filter(a => a.category === c).reduce((s,a) => s + a.value, 0);
-  const debt = data.liabilities.reduce((s,l) => s + l.value, 0);
-  const loanDebt = data.liabilities.filter(l => !isPropDebt(l)).reduce((s,l) => s + l.value, 0);
-  const liquid = sumCat('stocks') + sumCat('crypto') + sumCat('savings');
-  const savings = sumCat('savings');
-  const propEq = sumCat('property') - (debt - loanDebt);
-  const netWorth = liquid + propEq - loanDebt;
+  const tot = lensTotals(data, 'ours');
+  const now = lensTotals(data, lens);
+  const liquid = now.liquid;
+  const planContrib = lens === 'charlotte' ? (Number(data.fireParams.charlotteContribution) || 0)
+    : (Number(data.fireParams.monthlyContribution) || 0) + (lens === 'ours' ? (Number(data.fireParams.charlotteContribution) || 0) : 0);
 
   const takeSnapshot = () => {
     const month = ISO(TODAY).slice(0,7);
-    const entry = { date: ISO(TODAY), liquidNW: Math.round(liquid*100)/100,
-      savings: Math.round(savings*100)/100, propertyEquity: Math.round(propEq*100)/100,
-      netWorth: Math.round(netWorth*100)/100, mortgage: data.property.mortgageBalance,
-      monthlyInvest: data.fireParams.monthlyContribution };
-    const next = snaps.filter(s => s.date.slice(0,7) !== month).concat([entry])
+    const r2 = v => Math.round(v * 100) / 100;
+    const entry = { date: ISO(TODAY), liquidNW: r2(tot.liquid), savings: r2(tot.savings), propertyEquity: r2(tot.propEq),
+      netWorth: r2(tot.netWorth), fiPot: r2(tot.fiPot), mortgage: data.property.mortgageBalance,
+      monthlyInvest: (Number(data.fireParams.monthlyContribution) || 0) + (Number(data.fireParams.charlotteContribution) || 0),
+      by: snapParts(data) };
+    const next = allSnaps.filter(s => s.date.slice(0,7) !== month).concat([entry])
                       .sort((a,b) => a.date.localeCompare(b.date));
     setData({ ...data, snapshots: next });
   };
-  const delSnap = date => setData({ ...data, snapshots: snaps.filter(s => s.date !== date) });
+  const delSnap = date => setData({ ...data, snapshots: allSnaps.filter(s => s.date !== date) });
   const editSnap = (date, k, v) => setData({ ...data,
-    snapshots: snaps.map(s => s.date === date ? { ...s, [k]: v } : s) });
+    snapshots: allSnaps.map(s => {
+      if (s.date !== date) return s;
+      if (lens !== 'ours' && s.by && s.by[lens]) return { ...s, by: { ...s.by, [lens]: { ...s.by[lens], [k]: v } } };
+      return { ...s, [k]: v };
+    }) });
 
   /* chart rows + expected trajectory (5% net + contributions) */
   const rows = [];
@@ -4020,7 +5087,7 @@ function HistoryTab({ data, setData, lens = 'sven' }){
     else {
       const m = monthsBetween(snaps[i-1].date, s.date);
       let e = rows[i-1].expected;
-      for (let k = 0; k < m; k++) e = e*(1 + 0.05/12) + (s.monthlyInvest || data.fireParams.monthlyContribution);
+      for (let k = 0; k < m; k++) e = e*(1 + 0.05/12) + (s.monthlyInvest != null ? s.monthlyInvest : planContrib);
       expected = e;
     }
     rows.push({
@@ -4034,7 +5101,7 @@ function HistoryTab({ data, setData, lens = 'sven' }){
     });
   });
   const deltas = rows.filter(r => r.delta !== null);
-  const refExpected = data.fireParams.monthlyContribution + liquid * 0.05/12;
+  const refExpected = planContrib + liquid * 0.05/12;
 
   /* stats */
   let stats = null;
@@ -4050,10 +5117,10 @@ function HistoryTab({ data, setData, lens = 'sven' }){
     const worst = deltas.reduce((a,b) => b.delta < a.delta ? b : a);
     const cagr = first.liquidNW > 0 ? (Math.pow(last.liquidNW/first.liquidNW, 12/span) - 1) * 100 : 0;
     return renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap, editSnap,
-      fileRef, data, setData, lens,
+      fileRef, data, setData, lens, legacyN, hiddenN,
       stats: { avg3, growth12, span, best, worst, cagr } });
   }
-  return renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap, editSnap, fileRef, data, setData, stats, lens });
+  return renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap, editSnap, fileRef, data, setData, stats, lens, legacyN, hiddenN });
 }
 
 function doBackup(data){
@@ -4065,7 +5132,7 @@ function doBackup(data){
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
-function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap, editSnap, fileRef, data, setData, stats, lens }){
+function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap, editSnap, fileRef, data, setData, stats, lens, legacyN, hiddenN }){
   const onRestore = e => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -4075,7 +5142,7 @@ function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap
         const parsed = JSON.parse(reader.result);
         if (!parsed || !parsed.assets) { alert('This file is not a valid fintrack backup.'); return; }
         if (confirm('Replace ALL current data with this backup? This cannot be undone.')){
-          const merged = { ...seedData(), ...parsed };
+          const merged = migrate({ ...seedData(), ...parsed });   // an older backup gets the same upgrades as a normal start
           setData(merged);
           try { localStorage.setItem(STORAGE_KEY, JSON.stringify(merged)); } catch(err){}
         }
@@ -4098,7 +5165,9 @@ function renderHistory({ snaps, rows, deltas, refExpected, takeSnapshot, delSnap
           </div>
         </div>
         <div className="sub">One snapshot per month — saving again in the same month overwrites it.</div>
-        {lens && lens !== 'ours' && <div className="sub" style={{marginTop:4}}>This tracks <b>total household</b> net worth — snapshots are stored as aggregates, so History isn't split by person.</div>}
+        <div className="sub" style={{marginTop:4}}>{lens === 'ours' ? 'Household totals.' : lens === 'charlotte' ? 'Charlotte’s own money, joint items for her share.' : 'Your own money, joint items for your share.'} Every snapshot stores all three views, so switching lens never mixes them.</div>
+        {legacyN > 0 && <div className="sub" style={{marginTop:4, color:'var(--gold)'}}>{legacyN} older snapshot{legacyN === 1 ? '' : 's'} only hold household totals, because they were saved before the views were split. They are shown as they are. New snapshots are exact.</div>}
+        {hiddenN > 0 && <div className="sub" style={{marginTop:4, color:'var(--gold)'}}>{hiddenN} older snapshot{hiddenN === 1 ? ' has' : 's have'} no figures for Charlotte yet. Her history starts with the next one you save.</div>}
       </div>
 
       {snaps.length === 0 && (
@@ -5561,9 +6630,7 @@ function GoalsTab({ data, setData, lens = 'sven' }){
   const totalIn = lens === 'charlotte' ? ((data.income || {}).charlotte || 0)
     : lens === 'ours' ? (((data.income || {}).sven || 0) + ((data.income || {}).charlotte || 0))
     : ((data.income || {}).sven || 0);
-  const monthlyFixed = lens === 'ours'
-    ? gShared + gFc.filter(c => !c.shared).reduce((s, c) => s + monthlyEq(c), 0)
-    : gContribEach + gPersonal;
+  const monthlyFixed = monthBudget(data, lens, nowMK).totalFixed;
   const varByMonth = {};
   (data.transactions || []).filter(t => t.amount < 0 && !t.isTransfer && catOf(data, t.categoryId).type === 'variable' && lensMatch(t.account, lens))
     .forEach(t => { const mk = t.date.slice(0,7); varByMonth[mk] = (varByMonth[mk] || 0) + Math.abs(t.amount); });
@@ -5945,14 +7012,15 @@ function Panel({ n, title, meta, to, setTab, cls, children }){
 function Ring({ pct, color, label, value, size = 44 }){
   const r = (size - 5) / 2, c = 2 * Math.PI * r;
   const p = Math.max(0, Math.min(100, pct || 0));
+  const [shown, setShown] = useState(0);
+  useEffect(() => { const id = setTimeout(() => setShown(p), 120); return () => clearTimeout(id); }, [p]);
   return (
     <div style={{textAlign:'center', minWidth:0}}>
       <svg width={size} height={size} viewBox={'0 0 ' + size + ' ' + size} aria-hidden="true">
         <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--surface2)" strokeWidth={4}/>
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={4} strokeLinecap="round"
-          strokeDasharray={c} strokeDashoffset={c - c * p / 100}
-          transform={'rotate(-90 ' + (size/2) + ' ' + (size/2) + ')'}
-          style={{transition:'stroke-dashoffset 1s cubic-bezier(.25,.8,.3,1)'}}/>
+        <circle className="ring-arc" cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={4} strokeLinecap="round"
+          strokeDasharray={c} strokeDashoffset={c - c * shown / 100}
+          transform={'rotate(-90 ' + (size/2) + ' ' + (size/2) + ')'}/>
       </svg>
       <div className="mono-lab" style={{marginTop:2}}>{label}</div>
       <div className="mono" style={{fontSize:11.5}}>{value}</div>
@@ -5981,17 +7049,18 @@ function Spark({ points, color = 'var(--red)', h = 52 }){
 
 /* Impulse buy: prices a purchase in hours of your life and forgone compounding.
    Deliberately not moralising — it reports, you decide. */
-function ImpulseBuy({ data }){
+function ImpulseBuy({ data, lens }){
   const fp = data.fireParams || {};
   const [price, setPrice] = useState(250);
   const income = data.income || {};
-  const netMonthly = (income.sven || 0);
-  const hourly = netMonthly > 0 ? netMonthly / 173.3 : 0;
-  const age = currentAge(fp.birthYear);
-  const yrs = Math.max(1, (fp.targetAge || 55) - age);
+  const plan = planFor(data, lens || 'sven');
+  const netMonthly = lens === 'charlotte' ? (income.charlotte || 0) : lens === 'ours' ? (income.sven || 0) + (income.charlotte || 0) : (income.sven || 0);
+  const hourly = netMonthly > 0 ? netMonthly / (173.3 * (lens === 'ours' ? 2 : 1)) : 0;
+  const tgt = Number(plan.fp.targetAge) || 55;
+  const yrs = Math.max(1, tgt - exactAge(plan.fp.birthYear, plan.fp.birthMD));
   const grow = Math.pow(1 + (fp.grossReturn || 7) / 100, yrs);
   const future = price * grow;
-  const contribM = fp.monthlyContribution || 0;   // his own, like the income above
+  const contribM = Number(plan.fp.monthlyContribution) || 0;   // same lens as the income above
   const days = contribM > 0 ? price / (contribM / 30.4) : null;
   const hours = hourly > 0 ? price / hourly : null;
   const verdict = hours === null ? 'Set your income in Budget for the hours-of-life figure.'
@@ -6018,7 +7087,7 @@ function ImpulseBuy({ data }){
         <div className="statbox">
           <div className="mono-lab">If invested instead</div>
           <div className="sv" style={{color:'var(--green)'}}>{fmt0(future)}</div>
-          <div className="sub">by age {fp.targetAge || 55} at {fp.grossReturn || 7}%</div>
+          <div className="sub">by age {tgt} at {fp.grossReturn || 7}%</div>
         </div>
         <div className="statbox">
           <div className="mono-lab">Hours of your life</div>
@@ -6054,8 +7123,8 @@ function ImpulseBuy({ data }){
    basis as its own tab, so nothing here can quietly disagree with the detail views. */
 function DashboardTab({ data, lens = 'sven', setTab }){
   const fp = data.fireParams || {};
-  const vAssets = (data.assets || []).filter(a => lensMatch(a.owner, lens));
-  const vLiabs = (data.liabilities || []).filter(l => lensMatch(l.owner, lens));
+  const vAssets = lensItems(data.assets, lens, data);       // joint items count for this lens's share
+  const vLiabs = lensItems(data.liabilities, lens, data);
   const sumCat = c => vAssets.filter(a => a.category === c).reduce((s,a) => s + a.value, 0);
   const gross = vAssets.reduce((s,a) => s + a.value, 0);
   const debt = vLiabs.reduce((s,l) => s + l.value, 0);
@@ -6067,37 +7136,19 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   const propEquity = propVal - propDebt;
   const ltv = propVal > 0 ? propDebt / propVal * 100 : 0;
 
-  /* FI target on the same basis as the FIRE tab: spend / SWR, nothing leaned on */
-  const fcAnnual = (data.fixedCosts || []).reduce((s,c) => s + monthlyEq(c), 0) * 12;
-  const chPlanD = lens === 'charlotte' ? charlottePlan(data) : null;
-  const spend = lens === 'sven' ? (fp.annualWithdrawal || 0)
-    : chPlanD ? chPlanD.spendY
-    : (fp.householdSpend > 0 ? fp.householdSpend : fcAnnual);
-  const swr = fp.swr || 4;
-  const fiTarget = spend > 0
-    ? (lens === 'sven'   // Me: the FIRE tab's own FI number (core spend plus the mortgage share while it runs)
-        ? potNeededAt(noPensions(fp), fp.targetAge || 55, fp.grossReturn || 7, fp.inflation != null ? fp.inflation : 2.5)
-        : spend / (swr / 100))
-    : 0;
+  /* FI target on the same basis as each lens's own FIRE view: the pure FI number, tax on the pot included */
+  const plan = planFor(data, lens);
+  const pSim = simulate(plan.pot, plan.fp, plan.g, plan.infl);
+  const chPlanD = lens === 'charlotte' ? plan.ch : null;
+  const spend = plan.spendTotal || 0;
+  const fiTarget = spend > 0 ? pSim.fireFull : 0;
   const fiPct = fiTarget > 0 ? Math.min(100, investable / fiTarget * 100) : 0;
 
-  /* this month, mirroring the Budget tab */
+  /* this month, from the same source as the Budget tab */
   const income = data.income || {};
-  const hh = data.household || {};
-  const contribEach = hh.jointContribEach != null ? hh.jointContribEach : 1000;
-  const fc = data.fixedCosts || [];
-  const sharedTotal = fc.filter(c => c.shared).reduce((s,c) => s + monthlyEq(c), 0);
-  const personalFixed = fc.filter(c => !c.shared && lensMatch(c.owner, lens)).reduce((s,c) => s + monthlyEq(c), 0);
-  let totalFixed, totalIn;
-  if (lens === 'charlotte'){ totalFixed = contribEach; totalIn = income.charlotte || 0; }
-  else if (lens === 'ours'){ totalFixed = sharedTotal + personalFixed; totalIn = (income.sven || 0) + (income.charlotte || 0); }
-  else { totalFixed = contribEach + personalFixed; totalIn = income.sven || 0; }
   const mk = monthKey();
-  const monthTx = (data.transactions || []).filter(t => t.date.slice(0,7) === mk && !t.isTransfer && lensMatch(t.account, lens));
-  const totalVar = monthTx.filter(t => t.amount < 0 && catOf(data, t.categoryId).type === 'variable')
-    .reduce((s,t) => s + Math.abs(t.amount), 0);
-  const surplus = totalIn - (totalFixed + totalVar);
-  const savingsRate = totalIn > 0 ? surplus / totalIn * 100 : 0;
+  const mb = monthBudget(data, lens, mk);
+  const totalFixed = mb.totalFixed, totalIn = mb.totalIn, totalVar = mb.totalVar, surplus = mb.surplus, savingsRate = mb.savingsRate;
 
   /* portfolio: DEGIRO money-in vs live value — same anchor as the growth card */
   const ptx = data.portfolioTx || [];
@@ -6115,7 +7166,8 @@ function DashboardTab({ data, lens = 'sven', setTab }){
 
   const snaps = (data.snapshots || []).slice().sort((a,b) => a.date.localeCompare(b.date));
   const lastSnap = snaps[snaps.length - 1] || null;
-  const snapDelta = (lens === 'sven' && lastSnap && lastSnap.liquidNW > 0) ? liquid - lastSnap.liquidNW : null;
+  const lastV = snapFor(lastSnap, lens);
+  const snapDelta = (lastV && !lastV.legacy && lastV.liquidNW > 0) ? liquid - lastV.liquidNW : null;
 
   /* nudges — each jumps to where it gets fixed */
   const nudges = [];
@@ -6128,8 +7180,8 @@ function DashboardTab({ data, lens = 'sven', setTab }){
     nudges.push({ t:'No net-worth snapshot for this month yet', to:'history', go:'History' });
   if (chPlanD && chPlanD.doneN < chPlanD.steps.length)
     nudges.unshift({ t:'Start here · ' + chPlanD.doneN + ' of ' + chPlanD.steps.length + ' first steps done', to:'fire', go:'FIRE' });
-  if (lens === 'ours' && !(fp.householdSpend > 0))
-    nudges.push({ t:'Household spend is guessed from fixed costs — set the real figure', to:'fire', go:'FIRE' });
+  if (lastSnap && !lastSnap.by)
+    nudges.push({ t:'Save a snapshot so History keeps Me, Charlotte and Ours apart', to:'history', go:'History' });
   if (lens === 'ours' && !(fp.charlotteContribution > 0))
     nudges.push({ t:'Charlotte invests €0/mo in the projection', to:'fire', go:'FIRE' });
   if (lens === 'ours' && !(income.charlotte > 0))
@@ -6149,19 +7201,15 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
   const dayOfYear = Math.floor((TODAY - new Date(TODAY.getFullYear(), 0, 0)) / 86400000);
   const dateLine = TODAY.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
-  const contribM = lens === 'charlotte' ? (fp.charlotteContribution || 0)
-    : (fp.monthlyContribution || 0) + (lens === 'sven' ? 0 : (fp.charlotteContribution || 0));
-  const age = chPlanD ? currentAge(chPlanD.cp.birthYear, chPlanD.cp.birthMD) : currentAge(fp.birthYear);
-  const yrsToTarget = Math.max(0, ((chPlanD ? chPlanD.cp.targetAge : fp.targetAge) || 55) - age);
-  const dInfl = fp.inflation != null ? fp.inflation : 2.5, dGross = fp.grossReturn || 7;
-  /* Me: the exact coast target of the FIRE tab (AOW per its toggle). Household views: spend / SWR. */
-  const fiTargetNom = (lens === 'sven' && fp.targetAge)
-    ? simulate(investable, fp, dGross, dInfl).fireAtTarget
-    : fiTarget * Math.pow(1 + dInfl / 100, yrsToTarget);
-  const coastFp = lens === 'ours' ? { ...fp, box3Exempt: (Number(fp.box3Exempt) || 0) * 2 } : fp;   // same basis as the Ours FIRE view
-  const coastToday = fiTarget > 0 ? coastNeededToday(fiTargetNom, yrsToTarget, coastFp, dGross, dInfl) : 0;
+  const contribM = Number(plan.fp.monthlyContribution) || 0;
+  const age = Math.floor(pSim.ax + 1e-9);
+  const tgtAge = Number(plan.fp.targetAge) || 55;
+  const yrsToTarget = Math.max(0, Math.round(pSim.T));
+  /* the coast target of each lens's own FIRE view */
+  const coastToday = fiTarget > 0 ? coastNeededToday(pSim.fireAtTarget, pSim.T, plan.fp, plan.g, plan.infl) : 0;
   const coastPct = coastToday > 0 ? Math.min(100, investable / coastToday * 100) : 0;
-  const sparkPts = snaps.slice(-14).map(x => x.liquidNW || 0).filter(v => v > 0);
+  const runwayM = spend > 0 ? investable / (spend / 12) : 0;
+  const sparkPts = snaps.map(x => snapFor(x, lens)).filter(Boolean).slice(-14).map(x => x.liquidNW || 0).filter(v => v > 0);
   const allocRows = ASSET_CATS.map(c => ({ name:c.name, color:c.color, val:sumCat(c.id) })).filter(r => r.val > 0);
   const allocMax = Math.max.apply(null, allocRows.map(r => r.val).concat([1]));
 
@@ -6183,7 +7231,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   return (
     <div className="dash">
       <div className="dash-status">
-        <span>Sven Finance <span style={{opacity:.55}}>// v55</span></span>
+        <span>Sven Finance <span style={{opacity:.55}}>// v56</span></span>
         <span className="dstat">
           <span>Lens {(OWNERS[lens] || 'Ours')}</span>
           <span>{plural(vAssets.length, 'position')}</span>
@@ -6222,7 +7270,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
             <div className="statbox"><div className="mono-lab">FI pot</div><div className="sv">{fmt0(investable)}</div></div>
             <div className="statbox"><div className="mono-lab">Investing</div><div className="sv">{fmt0(contribM)}<span className="mono-lab"> /mo</span></div></div>
             <div className="statbox"><div className="mono-lab">Saving</div><div className="sv">{pct1(savingsRate)}</div></div>
-            <div className="statbox"><div className="mono-lab">Horizon</div><div className="sv">{yrsToTarget}<span className="mono-lab"> yrs</span></div></div>
+            <div className="statbox" title={'Goal age ' + tgtAge + ', ' + yrsToTarget + ' years away'}><div className="mono-lab">FI at age</div><div className="sv">{pSim.fireAgeX !== null ? Math.floor(pSim.fireAgeX + 1e-6) : '—'}<span className="mono-lab"> {pSim.fireYear !== null ? '· ' + pSim.fireYear : 'beyond horizon'}</span></div></div>
           </div>
           <div className="row" style={{justifyContent:'space-around', marginTop:11}}>
             <Ring pct={fiPct} color="var(--green)" label="FI" value={pct1(fiPct)}/>
@@ -6230,6 +7278,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
             <Ring pct={propVal > 0 ? (propEquity / propVal * 100) : 0} color="var(--blue)" label="Equity"
               value={propVal > 0 ? pct1(propEquity / propVal * 100) : '—'}/>
           </div>
+          <div className="mono-lab" style={{marginTop:9, textAlign:'center'}}>Runway · the pot covers {runwayM < 10 ? runwayM.toFixed(1).replace('.', ',') : Math.round(runwayM)} months of spend</div>
         </Panel>
 
         <Panel n="01" title="Operator" meta="Config" to="settings" setTab={setTab} cls="b-op">
@@ -6240,7 +7289,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
           <div className="mono-lab">Focus</div>
           <div style={{fontSize:13}}>FI accumulation</div>
           <div className="mono-lab" style={{marginTop:7}}>Target</div>
-          <div style={{fontSize:13}}>Age {fp.targetAge || 55} · now {age}</div>
+          <div style={{fontSize:13}}>Age {tgtAge} · now {age}</div>
           <div className="mono-lab" style={{marginTop:7}}>Withdrawal</div>
           <div style={{fontSize:13}}>{fp.swr || 4}% · spend × {Math.round(1/((fp.swr || 4)/100))}</div>
         </Panel>
@@ -6323,7 +7372,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
           })}
         </Panel>
 
-        <ImpulseBuy data={data}/>
+        <ImpulseBuy data={data} lens={lens}/>
       </div>
     </div>
   );
@@ -6344,9 +7393,64 @@ const TABS = [
 
 function FinanceModel(){
   const [data, setData] = useState(loadData);
-  const [tab, setTab] = useState('dash');
-  const [lens, setLens] = useState('sven');
+  const [tab, setTabRaw] = useState('dash');
+  const [lens, setLensRaw] = useState(() => { try { const l = localStorage.getItem('sven_finance_lens'); return (l === 'charlotte' || l === 'ours') ? l : 'sven'; } catch(e){ return 'sven'; } });
+  const [enter, setEnter] = useState({ k:'from-lens', n:0 });
+  const [ind, setInd] = useState({ left:0, width:0 });
+  const navRef = useRef(null);
   const sync = useCloudSync(data, setData);
+  const calm = () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  /* cross-fade the old view into the new one where the browser can, plain switch everywhere else */
+  const swap = fn => {
+    if (!calm() && document.startViewTransition && ReactDOM.flushSync){
+      try { document.startViewTransition(() => { ReactDOM.flushSync(fn); }); return; } catch(e){}
+    }
+    fn();
+  };
+  const setTab = id => {
+    if (id === tab) return;
+    const a = TABS.findIndex(t => t.id === tab), b = TABS.findIndex(t => t.id === id);
+    swap(() => { try { window.scrollTo(0, 0); } catch(e){} setEnter(e => ({ k: b >= a ? 'from-right' : 'from-left', n: e.n + 1 })); setTabRaw(id); });
+  };
+  const setLens = id => {
+    if (id === lens) return;
+    try { localStorage.setItem('sven_finance_lens', id); } catch(e){}
+    swap(() => { setEnter(e => ({ k:'from-lens', n: e.n + 1 })); setLensRaw(id); });
+  };
+  useEffect(() => { document.documentElement.setAttribute('data-lens', lens); }, [lens]);
+  /* the underline slides to the active tab */
+  useLayoutEffect(() => {
+    const place = () => { const nav = navRef.current, el = nav && nav.querySelector('.tab.active');
+      if (el) setInd({ left: el.offsetLeft, width: el.offsetWidth }); };
+    place();
+    window.addEventListener('resize', place);
+    const id = setTimeout(place, 400);                      // again once the webfont has settled the widths
+    return () => { window.removeEventListener('resize', place); clearTimeout(id); };
+  }, [tab]);
+  /* cards rise one after another as they come into view. Hidden before paint, shown by the observer,
+     and anything that mounts later is simply visible, so nothing can get stuck invisible. */
+  useLayoutEffect(() => {
+    const main = document.querySelector('main');
+    if (!main || calm() || !('IntersectionObserver' in window)) return;
+    const els = Array.prototype.slice.call(main.querySelectorAll('.card, .panel, .placeholder, .dash-status'))
+      .filter(el => !el.parentElement.closest('.card, .panel'));
+    els.forEach(el => el.setAttribute('data-rv', '0'));
+    let batch = 0, timers = [];
+    const show = el => {
+      if (el.getAttribute('data-rv') !== '0') return;
+      const d = Math.min(batch++, 7) * 60;
+      el.style.setProperty('--rv-d', d + 'ms');
+      el.setAttribute('data-rv', '1');
+      timers.push(setTimeout(() => { el.removeAttribute('data-rv'); el.style.removeProperty('--rv-d'); }, d + 900));
+    };
+    const io = new IntersectionObserver(ents => {
+      ents.forEach(en => { if (en.isIntersecting){ show(en.target); io.unobserve(en.target); } });
+      timers.push(setTimeout(() => { batch = 0; }, 250));
+    }, { rootMargin: '0px 0px -6% 0px' });
+    els.forEach(el => io.observe(el));
+    const safety = setTimeout(() => els.forEach(el => { if (el.getAttribute('data-rv') === '0' && el.getBoundingClientRect().top < window.innerHeight) show(el); }), 900);
+    return () => { io.disconnect(); clearTimeout(safety); timers.forEach(clearTimeout); els.forEach(el => { el.removeAttribute('data-rv'); el.style.removeProperty('--rv-d'); }); };
+  }, [tab, lens]);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch(e){}
@@ -6359,9 +7463,7 @@ function FinanceModel(){
     fetchGbpEur().then(res => setData(d => applyGbpRate(d, res.rate))).catch(() => {});
   }, []);
 
-  const liquid = data.assets
-    .filter(a => a.category !== 'property' && lensMatch(a.owner, lens))
-    .reduce((s,a) => s + a.value, 0);
+  const liquid = lensTotals(data, lens).liquid;
 
   return (
     <div className="app">
@@ -6383,6 +7485,7 @@ function FinanceModel(){
           </div>
         </div>
         <div className="lens" role="tablist" aria-label="Whose finances">
+          <span className="lens-thumb" aria-hidden="true" style={{transform:'translateX(' + (Math.max(0, LENSES.findIndex(L => L[0] === lens)) * 100) + '%)'}}/>
           {LENSES.map(L => (
             <button key={L[0]} className={'lens-btn' + (lens === L[0] ? ' on' : '')}
               onClick={() => setLens(L[0])}>{L[1]}</button>
@@ -6391,16 +7494,17 @@ function FinanceModel(){
         <HeaderPill liquid={liquid} snapshots={data.snapshots} lens={lens}/>
       </div>
 
-      <nav className="tabs" role="tablist">
+      <nav className="tabs" role="tablist" ref={navRef}>
         {TABS.map(t => (
           <button key={t.id} role="tab" aria-selected={tab === t.id}
             title={t.title || t.label}
             className={'tab ' + (t.cls || '') + (tab === t.id ? ' active' : '')}
             onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
+        <span className="tab-ind" aria-hidden="true" style={{transform:'translateX(' + ind.left + 'px)', width: ind.width}}/>
       </nav>
 
-      <main key={tab}>
+      <main key={tab} className={enter.k + ' v' + (enter.n % 2)}>
         {tab === 'dash'     && <DashboardTab data={data} lens={lens} setTab={setTab}/>}
         {tab === 'networth' && <NetWorthTab data={data} setData={setData} lens={lens}/>}
         {tab === 'fire'     && <FireTab data={data} setData={setData} lens={lens} setTab={setTab}/>}
