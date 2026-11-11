@@ -3986,9 +3986,9 @@ function monthBudget(data, lens, mk){
    Dutch figures as known on 11 Nov 2026. The 2027 set is the cabinet's and Nibud's proposal, not final. */
 const HOME_ASOF = '11 Nov 2026';
 const NL_RULES = {
-  2026: { nhg:470000, single:17000, hra:37.56, starter:555000, giftYear:6908, giftOnce:33129, giftBracket:158669,
+  2026: { nhg:470000, single:17000, hra:37.56, starter:555000, giftYear:6908, giftOther:2769, giftOnce:33129, giftBracket:158669,
     wq:[[60000,24.6],[70000,25.3],[80000,27.2],[100000,28.0],[120000,28.9],[125000,29.2]] },
-  2027: { nhg:500000, single:18000, hra:38.16, starter:615000, giftYear:7088, giftOnce:33991, giftBracket:162795,
+  2027: { nhg:500000, single:18000, hra:38.16, starter:615000, giftYear:7088, giftOther:2841, giftOnce:33991, giftBracket:162795,
     wq:[[60000,25.0],[70000,25.7],[80000,27.7],[100000,28.5],[120000,29.4],[125000,29.6]] } };
 const LABEL_BONUS = { 'A++++':30000, 'A+++':25000, 'A++':20000, 'A+':20000, 'A':10000, 'B':10000, 'C':5000, 'D':5000, 'E':0, 'F':0, 'G':0 };
 const UK_IHT = { annual:3000, wedChild:5000, wedOther:1000, nrb:325000, rate:0.4 };
@@ -4024,40 +4024,69 @@ const ageOn = (by, md, d) => { const bp = birthParts(md); return (d - new Date(N
 /* ---- gifts. Sven's parents give under Dutch gift tax, where the recipient pays. Charlotte's parents
    live in the UK, which has no gift tax at all. Their gift only matters for UK inheritance tax if a
    parent dies within seven years. The Netherlands taxes a gift only when the giver lives here or left
-   recently, so a UK gift arrives free of Dutch tax. ---- */
-function giftSettings(data){ return { ukDonors:2, ukCarry:true, ukNeverNL:true, ...((data && data.giftSettings) || {}) }; }
+   recently, so a UK gift arrives free of Dutch tax.
+   A gift to both of you is half to each. For Dutch tax the partner of a child counts as a child, and
+   both share one exemption, but only once you are partners for gift tax: married, registered, or two
+   years of a notarial cohabitation contract and the same address (five years without a contract).
+   Before that the partner is "anyone else", with a small exemption and 30% above it. ---- */
+function giftSettings(data){ return { ukDonors:2, ukCarry:true, ukNeverNL:true, partners:false, ...((data && data.giftSettings) || {}) }; }
+const GIFT_TO = [['sven', 'Sven'], ['charlotte', 'Charlotte'], ['both', 'Both, half each']];
+function giftShares(to){ return to === 'both' ? { sven: 0.5, charlotte: 0.5 } : to === 'charlotte' ? { sven: 0, charlotte: 1 } : { sven: 1, charlotte: 0 }; }
 function giftLedger(data){
   const gs = giftSettings(data), fx = (data.fx && data.fx.GBP) || 1.17, fp = data.fireParams || {}, cp = chProfile(fp);
   const now = decNow(), D = Math.max(1, Math.min(2, Number(gs.ukDonors) || 2));
   const rows = (data.gifts || []).map(g => {
     const ym = ymParts(g.date, TODAY.getFullYear(), TODAY.getMonth() + 1), uk = g.from === 'uk';
     const amt = Math.max(0, Number(g.amount) || 0), when = ym[0] + (ym[1] - 0.5) / 12;
-    return { ...g, uk, y: ym[0], m: ym[1], when, amt, eur: uk ? amt * fx : amt, future: when > now,
-      to: g.to === 'charlotte' || g.to === 'sven' ? g.to : (uk ? 'charlotte' : 'sven'), use: g.use || 'invest', tax: 0, nlTaxed: false };
+    const to = (g.to === 'charlotte' || g.to === 'sven' || g.to === 'both') ? g.to : (uk ? 'charlotte' : 'sven');
+    return { ...g, uk, y: ym[0], m: ym[1], when, amt, eur: uk ? amt * fx : amt, future: when > now, to, sh: giftShares(to),
+      use: g.use || 'invest', tax: 0, taxBy: { sven: 0, charlotte: 0 }, nlTaxed: false, notes: [] };
   }).sort((a, b) => a.when - b.when);
   const warnings = [], nlYears = [];
-  const groups = [['nl', rows.filter(r => !r.uk)]];
-  if (!gs.ukNeverNL) groups.push(['uk', rows.filter(r => r.uk)]);
+  const age = (who, d) => who === 'sven' ? ageOn(fp.birthYear, fp.birthMD, d) : ageOn(cp.birthYear, cp.birthMD, d);
+  const groups = [['nl', 'sven', 'charlotte', rows.filter(r => !r.uk)]];
+  if (!gs.ukNeverNL) groups.push(['uk', 'charlotte', 'sven', rows.filter(r => r.uk)]);
   groups.forEach(grp => {
-    const list = grp[1]; let onceUsed = false;
+    const key = grp[0], child = grp[1], inlaw = grp[2], list = grp[3];
+    /* who is taxed together: one unit when you are partners, otherwise the child and the in-law apart */
+    const units = gs.partners ? [{ id:'both', who:[child, inlaw], kind:true }]
+      : [{ id:'child', who:[child], kind:true }, { id:'inlaw', who:[inlaw], kind:false }];
+    let onceUsed = false;
     Array.from(new Set(list.map(r => r.y))).sort().forEach(y => {
-      const R = nlRules(y), inY = list.filter(r => r.y === y), total = inY.reduce((s, r) => s + r.eur, 0);
-      const first = inY.filter(r => r.once)[0];
-      let once = false;
-      if (first){
-        const d = new Date(first.y, first.m - 1, 15);
-        const young = Math.min(ageOn(fp.birthYear, fp.birthMD, d), ageOn(cp.birthYear, cp.birthMD, d));
-        if (onceUsed) warnings.push('The one-time higher exemption can be used once in a lifetime. In ' + y + ' the normal yearly exemption is applied.');
-        else if (!(young < 40)) warnings.push('In ' + y + ' you are both 40 or older, so the one-time higher exemption no longer applies.');
-        else { once = true; onceUsed = true; }
-      }
-      const exempt = once ? R.giftOnce : R.giftYear, taxable = Math.max(0, total - exempt);
-      const tax = Math.min(taxable, R.giftBracket) * 0.10 + Math.max(0, taxable - R.giftBracket) * 0.20;
-      inY.forEach(r => { r.tax = total > 0 ? tax * r.eur / total : 0; r.nlTaxed = true; });
-      nlYears.push({ key: grp[0], y, total, exempt, once, taxable, tax, file: once || total > R.giftYear, room: Math.max(0, exempt - total), R });
+      const R = nlRules(y), inY = list.filter(r => r.y === y);
+      units.forEach(u => {
+        const part = r => u.who.reduce((t, w) => t + r.sh[w], 0) * r.eur;
+        const mine = inY.filter(r => part(r) > 0);
+        if (!mine.length) return;
+        const total = mine.reduce((t, r) => t + part(r), 0);
+        let once = false;
+        const first = u.kind ? mine.filter(r => r.once)[0] : null;
+        if (first){
+          const d = new Date(first.y, first.m - 1, 15);
+          const young = Math.min.apply(null, u.who.map(w => age(w, d)));
+          if (onceUsed) warnings.push('The one-time higher exemption can be used once in a lifetime. In ' + y + ' the normal yearly exemption is applied.');
+          else if (!(young < 40)) warnings.push('In ' + y + ' the one-time higher exemption no longer applies, because of age 40.');
+          else { once = true; onceUsed = true; }
+        }
+        if (!u.kind && inY.some(r => r.once && part(r) > 0))
+          warnings.push('The one-time higher exemption is only for a child, or a partner once you count as partners. It does not cover the part for ' + (inlaw === 'charlotte' ? 'Charlotte' : 'Sven') + ' in ' + y + '.');
+        const exempt = u.kind ? (once ? R.giftOnce : R.giftYear) : R.giftOther;
+        const taxable = Math.max(0, total - exempt), lo = u.kind ? 0.10 : 0.30, hi = u.kind ? 0.20 : 0.40;
+        const tax = Math.min(taxable, R.giftBracket) * lo + Math.max(0, taxable - R.giftBracket) * hi;
+        mine.forEach(r => {
+          const share = part(r) / total;
+          u.who.forEach(w => { if (r.sh[w] > 0) r.taxBy[w] += tax * share * (r.sh[w] * r.eur / part(r)); });
+          r.nlTaxed = true;
+          r.notes.push({ key, unit: u.id, who: u.who, kind: u.kind, y, exempt, total, once, tax: tax * share, room: Math.max(0, exempt - total) });
+        });
+        nlYears.push({ key, unit: u.id, who: u.who, kind: u.kind, y, total, exempt, once, taxable, tax,
+          file: once || total > exempt, room: Math.max(0, exempt - total), R });
+      });
     });
   });
-  /* UK side, in pounds, per tax year from 6 April. Each parent has £3.000 a year, and one unused year carries over. */
+  rows.forEach(r => { r.tax = r.taxBy.sven + r.taxBy.charlotte; });
+  /* UK side, in pounds, per tax year from 6 April. Each parent has £3.000 a year, and one unused year carries over.
+     The wedding allowance is £5.000 to their own child and £1.000 to anyone else, per parent. */
   const ukRows = rows.filter(r => r.uk);
   let curTY = null, curLeft = 0, carry = 0;
   ukRows.forEach(r => {
@@ -4067,7 +4096,7 @@ function giftLedger(data){
       curTY = ty; curLeft = UK_IHT.annual * D;
     }
     let left = r.amt;
-    const w = r.wedding ? Math.min(left, (r.to === 'charlotte' ? UK_IHT.wedChild : UK_IHT.wedOther) * D) : 0; left -= w;
+    const w = r.wedding ? Math.min(r.amt * r.sh.charlotte, UK_IHT.wedChild * D) + Math.min(r.amt * r.sh.sven, UK_IHT.wedOther * D) : 0; left -= w;
     const a = Math.min(left, curLeft); curLeft -= a; left -= a;
     const c = Math.min(left, carry); carry -= c; left -= c;
     r.ukExempt = w + a + c; r.pet = left; r.freeY = r.y + 7; r.freeM = r.m;
@@ -4076,17 +4105,19 @@ function giftLedger(data){
   const live = ukRows.filter(r => r.pet > 0 && r.when > lastWhen - 7 && r.when + 7 > now);
   const cumPet = live.reduce((s, r) => s + r.pet, 0), band = UK_IHT.nrb * D;
   const lastFree = live.length ? live[live.length - 1] : null;
-  rows.forEach(r => { r.net = r.eur - r.tax; });
+  rows.forEach(r => { r.net = r.eur - r.tax; r.netBy = { sven: r.eur * r.sh.sven - r.taxBy.sven, charlotte: r.eur * r.sh.charlotte - r.taxBy.charlotte }; });
   return { rows, nlYears, warnings, fx, gs,
     uk: { donors: D, band, cumPet, exemptNow: ukRows.reduce((s, r) => s + (r.ukExempt || 0), 0), total: ukRows.reduce((s, r) => s + r.amt, 0),
       excess: Math.max(0, cumPet - band), worstTax: Math.max(0, cumPet - band) * UK_IHT.rate, bandUsed: Math.min(cumPet, band), lastFree },
     nlTax: rows.reduce((s, r) => s + r.tax, 0) };
 }
-/* Gifts still to come that get invested, as one-off amounts for a lens's projection. After Dutch tax. */
+/* What one lens receives from a gift, after Dutch tax. Ours gets both halves. */
+function giftNetFor(r, lens){ return lens === 'ours' ? r.net : (r.netBy[lens] || 0); }
+/* Gifts still to come that get invested, as one-off amounts for a lens's projection. */
 function giftLumps(data, lens){
   if (!data || !(data.gifts || []).length) return [];
-  return giftLedger(data).rows.filter(r => r.future && r.use === 'invest' && r.net > 0 && (lens === 'ours' || r.to === lens))
-    .map(r => ({ year: r.y, when: r.when, amount: r.net, gift: true, uk: r.uk, to: r.to,
+  return giftLedger(data).rows.filter(r => r.future && r.use === 'invest' && giftNetFor(r, lens) > 0.5)
+    .map(r => ({ year: r.y, when: r.when, amount: giftNetFor(r, lens), gift: true, uk: r.uk, to: r.to,
       label: (r.uk ? 'Gift from Charlotte’s parents' : 'Gift from Sven’s parents') }));
 }
 
@@ -4125,8 +4156,9 @@ function mortgageModel(data, over){
   const sale = chSale(data);
   const flatHome = (withC && s.useFlat && sale.active) ? sale.toHome : 0;
   const gl = giftLedger(data);
-  const giftRows = gl.rows.filter(g => g.use === 'home' && ((g.to === 'sven' && withS) || (g.to === 'charlotte' && withC)));
-  const giftHome = giftRows.reduce((t, g) => t + g.net, 0);
+  const giftPart = g => (withS ? g.netBy.sven : 0) + (withC ? g.netBy.charlotte : 0);
+  const giftRows = gl.rows.filter(g => g.use === 'home' && giftPart(g) > 0.5);
+  const giftHome = giftRows.reduce((t, g) => t + giftPart(g), 0);
   const extraOwn = Math.max(0, Number(s.extraOwn) || 0);
   const own = homeSale + flatHome + giftHome + extraOwn;
   const otherCosts = Math.max(0, Number(s.otherCosts) || 0);
@@ -5249,7 +5281,7 @@ function GiftsCard({ data, setData, lens }){
   const nowYM = ISO(TODAY).slice(0, 7), y0 = TODAY.getFullYear(), R0 = nlRules(y0), R1 = nlRules(y0 + 1);
   const add = g => setGifts(gifts.concat([{ id: uid(), date: nowYM, use:'invest', ...g }]));
   const USES = [['invest', 'Invest it'], ['home', 'Own money for a home'], ['mortgage', 'Pay off the mortgage'], ['spend', 'Spend or save it']];
-  const nlThis = L.nlYears.filter(x => x.key === 'nl' && x.y === y0)[0];
+  const nlThis = L.nlYears.filter(x => x.key === 'nl' && x.kind && x.y === y0)[0];
   const nlRoom = nlThis ? nlThis.room : R0.giftYear;
   const onceUsed = L.nlYears.some(x => x.once);
   const svenTurns40 = (Number(fp.birthYear) || 1997) + 40;
@@ -5264,23 +5296,31 @@ function GiftsCard({ data, setData, lens }){
       months: (a.fireAgeX !== null && b.fireAgeX !== null) ? (b.fireAgeX - a.fireAgeX) * 12 : null,
       dReal: a.realAtTarget - b.realAtTarget, target: plan.fp.targetAge };
   }), key);
-  const repay = L.rows.filter(r => r.future && r.use === 'mortgage' && r.to === 'sven').reduce((t, r) => t + r.net, 0);
+  const repay = L.rows.filter(r => r.future && r.use === 'mortgage').reduce((t, r) => t + r.netBy.sven, 0);
   const rate = Number(p.interestRate) || 3;
   const am0 = repay > 0 ? amortize(p.mortgageBalance || 0, rate, MORTGAGE_PAYMENT, 0) : null;
   const am1 = repay > 0 ? amortize(Math.max(0, (p.mortgageBalance || 0) - repay), rate, MORTGAGE_PAYMENT, 0) : null;
   const hra = nlRules(y0).hra / 100;
   const homeSum = L.rows.filter(r => r.use === 'home').reduce((t, r) => t + r.net, 0);
+  const nm = w => w === 'sven' ? 'Sven' : 'Charlotte';
+  const noteTxt = n => {
+    const who = n.who.length > 1 ? 'you two together' : nm(n.who[0]);
+    const what = n.kind ? (n.once ? 'one-time exemption' : 'yearly exemption') : 'exemption for anyone else';
+    return (n.tax > 0.5 ? fmt0(n.tax) + ' tax for ' + who : 'No tax for ' + who) + ', ' + fmt0(n.exempt) + ' ' + what + ' in ' + n.y
+      + (n.total > n.exempt ? ' on ' + fmt0(n.total) + (n.kind ? '' : ', 30% above it') : n.room > 0 ? ', ' + fmt0(n.room) + ' still free' : '') + '.';
+  };
   const line = r => {
     if (!r.uk || r.nlTaxed){
-      const yr = L.nlYears.filter(x => x.key === (r.uk ? 'uk' : 'nl') && x.y === r.y)[0];
-      const base = r.tax > 0.5
-        ? <span><b className="red">{fmt0(r.tax)} Dutch gift tax</b>, {fmt0(r.net)} arrives. {yr ? fmt0(yr.exempt) + ' of ' + fmt0(yr.total) + ' in ' + r.y + ' is free' + (yr.once ? ' with the one-time exemption' : '') + '.' : ''}</span>
-        : <span><b className="green">No tax.</b> {yr ? 'Inside the ' + fmt0(yr.exempt) + (yr.once ? ' one-time' : ' yearly') + ' exemption for ' + r.y + (yr.room > 0 ? ', ' + fmt0(yr.room) + ' still free' : '') + '.' : ''}</span>;
-      return <span>{base}{yr && yr.file ? ' File a gift tax return before 1 March ' + (r.y + 1) + '.' : ''}</span>;
+      const file = r.notes.some(n => n.once || n.total > n.exempt);
+      return (
+        <span>{r.tax > 0.5 ? <b className="red">{fmt0(r.tax)} Dutch gift tax, {fmt0(r.net)} arrives. </b> : <b className="green">No tax. </b>}
+          {r.notes.map(noteTxt).join(' ')}{file ? ' File a gift tax return before 1 March ' + (r.y + 1) + '.' : ''}
+          {r.to === 'both' ? <span className="dim"> Half each, {fmt0(r.netBy.sven)} to Sven and {fmt0(r.netBy.charlotte)} to Charlotte.</span> : ''}</span>
+      );
     }
     return (
       <span><b className="green">No tax to pay.</b> No Dutch gift tax because they live in the UK, and the UK has none. {r.ukExempt > 0 ? gbpfmt(r.ukExempt) + ' is outside UK inheritance tax at once. ' : ''}
-        {r.pet > 0 ? gbpfmt(r.pet) + ' clears in ' + fmtYM(r.freeY, r.freeM) + ', seven years on.' : ''} <span className="dim">≈ {fmt0(r.eur)} at {String(L.fx).replace('.', ',')}</span></span>
+        {r.pet > 0 ? gbpfmt(r.pet) + ' clears in ' + fmtYM(r.freeY, r.freeM) + ', seven years on.' : ''} <span className="dim">≈ {fmt0(r.eur)} at {String(L.fx).replace('.', ',')}{r.to === 'both' ? ', half each' : ''}</span></span>
     );
   };
   return (
@@ -5297,7 +5337,7 @@ function GiftsCard({ data, setData, lens }){
           <div className="gift-top">
             <span className="gift-flag">{r.uk ? '🇬🇧' : '🇳🇱'}</span>
             <span className="gift-who">{r.uk ? 'Charlotte’s parents' : 'Sven’s parents'} <span className="dim">to</span></span>
-            <select value={r.to} onChange={e => upd(r.id, { to: e.target.value })}><option value="sven">Sven</option><option value="charlotte">Charlotte</option></select>
+            <select value={r.to} onChange={e => upd(r.id, { to: e.target.value })}>{GIFT_TO.map(o => <option key={o[0]} value={o[0]}>{o[1]}</option>)}</select>
             <NumInput value={r.amt} step={r.uk ? 500 : 500} width={110} suffix={r.uk ? '£' : '€'} onChange={v => upd(r.id, { amount: v })}/>
             <input type="month" value={r.date || nowYM} onChange={e => upd(r.id, { date: e.target.value })}/>
             <select value={r.use} onChange={e => upd(r.id, { use: e.target.value })}>{USES.map(u => <option key={u[0]} value={u[0]}>{u[1]}</option>)}</select>
@@ -5321,8 +5361,10 @@ function GiftsCard({ data, setData, lens }){
           <div className="kv"><span className="k">Free in {y0 + 1} <span className="dim small">provisional</span></span><span className="v">{fmt0(R1.giftYear)}</span></div>
           <div className="kv"><span className="k">One-time, instead of a yearly one <span className="dim small">until you turn 40 in {svenTurns40}</span></span><span className="v">{onceUsed ? 'planned' : fmt0(R0.giftOnce)}</span></div>
           <div className="kv"><span className="k">Above that</span><span className="v">10%, then 20% over {fmt0(R0.giftBracket)}</span></div>
-          <div className="sub">Both parents count as one giver. A gift to Charlotte from your parents is added to yours. December plus January uses two yearly exemptions weeks apart. The old exemption for a home ended in 2024.</div>
-          {L.nlYears.filter(x => x.key === 'nl').map(x => <div key={x.y} className="kv"><span className="k">{x.y} planned</span><span className="v">{fmt0(x.total)} · {x.tax > 0.5 ? <span className="red">{fmt0(x.tax)} tax</span> : <span className="green">no tax</span>}</span></div>)}
+          <div className="kv"><span className="k">To Charlotte, as long as you are not partners for gift tax</span><span className="v">{fmt0(R0.giftOther)}, then 30%</span></div>
+          <label className="row small" style={{gap:6, cursor:'pointer', margin:'6px 0'}}><input type="checkbox" checked={!!gs.partners} onChange={e => setGS({ partners: e.target.checked })}/> We count as partners for gift tax</label>
+          <div className="sub">Partners means married, registered, or two years of a notarial cohabitation contract and the same address (five years without a contract). Married within a year of a gift also counts. Then Charlotte is treated as their child and you share one exemption. Both parents count as one giver. December plus January uses two yearly exemptions weeks apart. The old exemption for a home ended in 2024.</div>
+          {L.nlYears.filter(x => x.key === 'nl').map(x => <div key={x.y + x.unit} className="kv"><span className="k">{x.y} planned{x.unit === 'inlaw' ? ', Charlotte’s part' : x.unit === 'both' ? ', together' : ''}</span><span className="v">{fmt0(x.total)} · {x.tax > 0.5 ? <span className="red">{fmt0(x.tax)} tax</span> : <span className="green">no tax</span>}</span></div>)}
         </div>
         <div className="statbox">
           <div className="mono-lab">🇬🇧 From Charlotte’s parents</div>
@@ -5350,7 +5392,7 @@ function GiftsCard({ data, setData, lens }){
           </div>
         ))}
         {homeSum > 0 && <div className="kv"><span className="k"><b style={{color:'var(--text)'}}>Home</b> <span className="dim">own money in the mortgage calculator</span></span><span className="v">{fmt0(homeSum)} less to borrow · about {fmt0(annuityM(homeSum, mcSettings(data).rate, 360))}/mo lower</span></div>}
-        {repay > 0 && am0 && am1 && <div className="kv"><span className="k"><b style={{color:'var(--text)'}}>Orchislaan mortgage</b> <span className="dim">{fmt0(repay)} paid off, same monthly payment</span></span><span className="v">{spanTxt(am0.months - am1.months)} shorter · {fmt0((am0.interestTotal - am1.interestTotal) * (1 - hra))} interest saved after tax</span></div>}
+        {repay > 0 && am0 && am1 && <div className="kv"><span className="k"><b style={{color:'var(--text)'}}>Orchislaan mortgage</b> <span className="dim">{fmt0(repay)} paid off, same monthly payment, Sven’s part only because the loan is his</span></span><span className="v">{spanTxt(am0.months - am1.months)} shorter · {fmt0((am0.interestTotal - am1.interestTotal) * (1 - hra))} interest saved after tax</span></div>}
       </div>}
       <div className="sub mt">Each view counts only gifts to that person, and Ours counts both. A gift lands in Box 3 on the next 1 January like any other money. Pounds are converted at today’s rate, so the euro amount moves until the transfer. A lender wants a short signed gift letter when a gift is used as own money. Dutch amounts for {y0 + 1} are provisional and the UK left its gift rules unchanged in the Budget of 28 October 2026. As known on {HOME_ASOF}.</div>
     </div>
@@ -7760,7 +7802,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   return (
     <div className="dash">
       <div className="dash-status">
-        <span>Sven Finance <span style={{opacity:.55}}>// v57</span></span>
+        <span>Sven Finance <span style={{opacity:.55}}>// v58</span></span>
         <span className="dstat">
           <span>Lens {(OWNERS[lens] || 'Ours')}</span>
           <span>{plural(vAssets.length, 'position')}</span>
