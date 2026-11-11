@@ -1,6 +1,6 @@
 // IMPORTANT: bump CACHE_VERSION on every deploy to force the PWA to fetch the new index.html.
 // Otherwise users see the old cached version forever.
-const CACHE_VERSION = 'finance-v56-odds-bridge-ours';
+const CACHE_VERSION = 'finance-v57-mortgage-gifts';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 // Third-party libraries and fonts the app needs to boot. Cached on first use so the

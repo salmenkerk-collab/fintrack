@@ -430,6 +430,21 @@
     .lever{ grid-template-columns:1fr 96px; } .lever-track{ grid-column:1 / 3; order:3; }
     .marginrow{ grid-template-columns:repeat(2,1fr); }
   }
+  /* v57 · mortgage and gifts */
+  .verdict{ margin-top:12px; padding:10px 13px; border-radius:10px; font-size:13px; border:1px solid var(--rule); background:var(--bg); animation: secRise .45s var(--ease) both; }
+  .verdict.ok{ border-color:rgba(94,107,59,.5); } .verdict.no{ border-color:rgba(162,73,43,.55); }
+  .buildrow{ display:flex; flex-wrap:wrap; align-items:stretch; gap:6px; }
+  .buildcell{ background:var(--bg); border-radius:9px; padding:7px 11px; min-width:0; animation: secRise .45s var(--ease) both; }
+  .buildcell .num{ font-weight:700; }
+  .buildrow > :nth-child(3){ animation-delay:.06s } .buildrow > :nth-child(5){ animation-delay:.12s } .buildrow > :nth-child(7){ animation-delay:.18s }
+  .buildrow > :nth-child(9){ animation-delay:.24s } .buildrow > :nth-child(11){ animation-delay:.3s }
+  .buildop{ align-self:center; color:var(--dim); font-family:var(--mono); }
+  .giftrow{ border:1px solid var(--rule); border-radius:11px; padding:9px 11px; margin-bottom:8px; background:var(--bg); transition:border-color .2s ease, transform .18s var(--ease); }
+  .giftrow:hover{ border-color:var(--gold); }
+  .gift-top{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .gift-flag{ font-size:18px; } .gift-who{ font-weight:600; font-size:13px; }
+  .gift-out{ margin-top:6px; line-height:1.5; }
+  .giftrow select, .giftrow input[type="month"], .form-grid input[type="month"], .form-grid select{ font:inherit; font-size:13px; }
   @media (prefers-reduced-motion: reduce){
     *, *::before, *::after{ animation:none !important; transition:none !important; }
     main [data-rv="0"]{ opacity:1; transform:none; }
@@ -791,6 +806,9 @@ function migrate(d){
     if (ft.promoInvest === undefined) ft.promoInvest = 300;
     d.settings._taxV56 = true;
   }
+  if (!Array.isArray(d.gifts)) d.gifts = [];
+  if (!d.giftSettings || typeof d.giftSettings !== 'object') d.giftSettings = {};
+  if (!d.mortgageCalc || typeof d.mortgageCalc !== 'object') d.mortgageCalc = {};
   if (!Array.isArray(d.goals)) d.goals = [{ id:'goal-car-2028', name:'New car', icon:'🚗', target:25000, targetDate:'2028-06', saved:0, monthly:0 }];
   /* one-time retro: tag already-imported broker funding (Flatex / DEGIRO / Trade Republic)
      and own-savings moves as transfers, so they drop out of spending & recurring-cost views */
@@ -2297,8 +2315,8 @@ function PeopleFireView({ data, setData, lens, setTab }){
   const hhContribM = Number(fiFp.monthlyContribution) || 0;
   const sim = simulate(investable, fiFp, fp.grossReturn, fp.inflation);
   const fiNumber = Math.round(sim.fireFull);           // her spend carried by investments alone, tax on the pot included
-  const fiAgeWith = amt => simulate(investable, { ...fiFp, lumpSums: (chSaleV && chSaleV.active && amt > 0)
-    ? [{ year: chSaleV.saleYear, when: chSaleV.saleYear + (chSaleV.saleMonth - 0.5) / 12, amount: amt }] : [] }, fp.grossReturn, fp.inflation);
+  const fiAgeWith = amt => simulate(investable, { ...fiFp, lumpSums: ((chSaleV && chSaleV.active && amt > 0)
+    ? [{ year: chSaleV.saleYear, when: chSaleV.saleYear + (chSaleV.saleMonth - 0.5) / 12, amount: amt }] : []).concat(plan.giftLumps || []) }, fp.grossReturn, fp.inflation);
   const hasSpend = householdSpend > 0;                // no spend set: no target to measure against
   const pctToFI = hasSpend && fiNumber > 0 ? Math.min(100, investable / fiNumber * 100) : 0;
   const chartRows = sim.rows.filter(r => r.t <= Math.ceil(sim.T));
@@ -2484,6 +2502,7 @@ function PeopleFireView({ data, setData, lens, setTab }){
             </ResponsiveContainer>
           </div>
         </div>}
+      <GiftNote plan={plan}/>
       {hasSpend && <OddsCard plan={plan} setFP={setFP}/>}
       {hasSpend && <LeversCard plan={plan} data={data} setData={setData}/>}
       {hasSpend && <TaxCard plan={plan} setFP={setFP}/>}
@@ -3029,6 +3048,7 @@ function HouseholdFireView({ data, setData, setTab }){
           <div className="sub">The red line falls with age because every year you work on shortens the bridge and adds pension. Where the two cross is the household FI date.</div>
         </div>}
 
+      <GiftNote plan={plan}/>
       <OddsCard plan={plan} setFP={setFP}/>
       <BridgeCard plan={plan} sim={base}/>
       <LeversCard plan={plan} data={data} setData={setData}/>
@@ -3134,13 +3154,13 @@ function FireTab({ data, setData, lens = 'sven', setTab }){
   /* One engine, one AOW setting. `base` drives every age on this tab: coast, FIRE, the scenarios,
      the charts and the footer. `pure` only answers "could the pot carry spend forever with nothing
      leaned on", which is what the progress bar and its milestones measure. */
-  const base = simulate(liquid, fp, fp.grossReturn, fp.inflation);
+  const base = simulate(liquid, plan.fp, fp.grossReturn, fp.inflation);
   const occOn = (fp.occPensions || {}).enabled !== false && ((fp.occPensions || {}).streams || []).length > 0;
   const pensOn = !!fp.aowEnabled || occOn;
-  const pure = pensOn ? simulate(liquid, noPensions(fp), fp.grossReturn, fp.inflation) : base;
-  const pess = simulate(liquid, fp, 5, 3);
-  const opt  = simulate(liquid, fp, 9, 2);
-  const needed = monthlyNeeded(liquid, fp);
+  const pure = pensOn ? simulate(liquid, noPensions(plan.fp), fp.grossReturn, fp.inflation) : base;
+  const pess = simulate(liquid, plan.fp, 5, 3);
+  const opt  = simulate(liquid, plan.fp, 9, 2);
+  const needed = monthlyNeeded(liquid, plan.fp);
   const aowOn = !!fp.aowEnabled;
   const stopAt = base.fireAge !== null ? base.fireAge : fp.targetAge;
   const credAtStop = base.pensionCreditAtFire !== null ? base.pensionCreditAtFire : base.pensionCredit;
@@ -3310,6 +3330,7 @@ function FireTab({ data, setData, lens = 'sven', setTab }){
         <Scen s={opt}  label="🟢 Best case" cls="opt"  gross={9} infl={2}/>
       </div>
 
+      <GiftNote plan={plan}/>
       <OddsCard plan={plan} setFP={setFP}/>
 
       <div className="card">
@@ -3961,14 +3982,217 @@ function monthBudget(data, lens, mk){
 /* The projection inputs for a lens. Me is the plan as entered. Charlotte is her own spend, age and
    money. Ours is one household: both pots, both contributions, both pensions, two Box 3 allowances,
    and the whole mortgage until it ends. Nothing here writes back, so the lenses stay separate. */
+/* ============================ v57 · buying a home and gifts from parents ============================
+   Dutch figures as known on 11 Nov 2026. The 2027 set is the cabinet's and Nibud's proposal, not final. */
+const HOME_ASOF = '11 Nov 2026';
+const NL_RULES = {
+  2026: { nhg:470000, single:17000, hra:37.56, starter:555000, giftYear:6908, giftOnce:33129, giftBracket:158669,
+    wq:[[60000,24.6],[70000,25.3],[80000,27.2],[100000,28.0],[120000,28.9],[125000,29.2]] },
+  2027: { nhg:500000, single:18000, hra:38.16, starter:615000, giftYear:7088, giftOnce:33991, giftBracket:162795,
+    wq:[[60000,25.0],[70000,25.7],[80000,27.7],[100000,28.5],[120000,29.4],[125000,29.6]] } };
+const LABEL_BONUS = { 'A++++':30000, 'A+++':25000, 'A++':20000, 'A+':20000, 'A':10000, 'B':10000, 'C':5000, 'D':5000, 'E':0, 'F':0, 'G':0 };
+const UK_IHT = { annual:3000, wedChild:5000, wedOther:1000, nrb:325000, rate:0.4 };
+function nlRules(year){ return NL_RULES[year <= 2026 ? 2026 : 2027]; }
+function annuityM(principal, ratePct, months){
+  const r = ratePct / 1200;
+  return r > 0 ? principal * r / (1 - Math.pow(1 + r, -months)) : principal / Math.max(1, months);
+}
+/* Share of gross income that may go to the mortgage. The lenders' table has a row per income and a
+   column per half point of interest. These anchors are read back from published 2026 and 2027 examples
+   and interpolated in between, so the result is an estimate within a few percent of an adviser's figure. */
+function woonquote(income, ratePct, year){
+  const t = nlRules(year).wq;
+  let p = t[t.length - 1][1];
+  if (income <= t[0][0]) p = t[0][1];
+  else for (let i = 1; i < t.length; i++) if (income <= t[i][0]){
+    p = t[i-1][1] + (t[i][1] - t[i-1][1]) * (income - t[i-1][0]) / (t[i][0] - t[i-1][0]); break; }
+  const band = Math.ceil(ratePct / 0.5 - 1e-9) - 10;                 // 0 for 4,5 to 5%
+  return Math.max(10, p + Math.max(-6, Math.min(5, band)) * 0.9);
+}
+/* A student loan or other credit counts with its real monthly payment, grossed up. */
+function debtFactor(ratePct){ return ratePct <= 2 ? 1.05 : ratePct <= 3 ? 1.1 : ratePct <= 4 ? 1.15 : ratePct <= 5 ? 1.2 : ratePct <= 6 ? 1.25 : 1.3; }
+function grossFromNet(netM){
+  if (!(netM > 0)) return 0;
+  let lo = 0, hi = 400000;
+  for (let i = 0; i < 40; i++){ const mid = (lo + hi) / 2; if (nlNet2026(mid, false, 0).regularM >= netM) hi = mid; else lo = mid; }
+  return Math.round(hi / 500) * 500;
+}
+const ymParts = (s, dy, dm) => { const m = /^(\d{4})-(\d{2})/.exec(s || ''); return m ? [parseInt(m[1], 10), parseInt(m[2], 10)] : [dy, dm]; };
+const fmtYM = (y, m) => new Intl.DateTimeFormat('en-GB', { month:'short', year:'numeric' }).format(new Date(y, m - 1, 1));
+const ageOn = (by, md, d) => { const bp = birthParts(md); return (d - new Date(Number(by) || 1997, bp[0], bp[1])) / (365.25 * 86400000); };
+
+/* ---- gifts. Sven's parents give under Dutch gift tax, where the recipient pays. Charlotte's parents
+   live in the UK, which has no gift tax at all. Their gift only matters for UK inheritance tax if a
+   parent dies within seven years. The Netherlands taxes a gift only when the giver lives here or left
+   recently, so a UK gift arrives free of Dutch tax. ---- */
+function giftSettings(data){ return { ukDonors:2, ukCarry:true, ukNeverNL:true, ...((data && data.giftSettings) || {}) }; }
+function giftLedger(data){
+  const gs = giftSettings(data), fx = (data.fx && data.fx.GBP) || 1.17, fp = data.fireParams || {}, cp = chProfile(fp);
+  const now = decNow(), D = Math.max(1, Math.min(2, Number(gs.ukDonors) || 2));
+  const rows = (data.gifts || []).map(g => {
+    const ym = ymParts(g.date, TODAY.getFullYear(), TODAY.getMonth() + 1), uk = g.from === 'uk';
+    const amt = Math.max(0, Number(g.amount) || 0), when = ym[0] + (ym[1] - 0.5) / 12;
+    return { ...g, uk, y: ym[0], m: ym[1], when, amt, eur: uk ? amt * fx : amt, future: when > now,
+      to: g.to === 'charlotte' || g.to === 'sven' ? g.to : (uk ? 'charlotte' : 'sven'), use: g.use || 'invest', tax: 0, nlTaxed: false };
+  }).sort((a, b) => a.when - b.when);
+  const warnings = [], nlYears = [];
+  const groups = [['nl', rows.filter(r => !r.uk)]];
+  if (!gs.ukNeverNL) groups.push(['uk', rows.filter(r => r.uk)]);
+  groups.forEach(grp => {
+    const list = grp[1]; let onceUsed = false;
+    Array.from(new Set(list.map(r => r.y))).sort().forEach(y => {
+      const R = nlRules(y), inY = list.filter(r => r.y === y), total = inY.reduce((s, r) => s + r.eur, 0);
+      const first = inY.filter(r => r.once)[0];
+      let once = false;
+      if (first){
+        const d = new Date(first.y, first.m - 1, 15);
+        const young = Math.min(ageOn(fp.birthYear, fp.birthMD, d), ageOn(cp.birthYear, cp.birthMD, d));
+        if (onceUsed) warnings.push('The one-time higher exemption can be used once in a lifetime. In ' + y + ' the normal yearly exemption is applied.');
+        else if (!(young < 40)) warnings.push('In ' + y + ' you are both 40 or older, so the one-time higher exemption no longer applies.');
+        else { once = true; onceUsed = true; }
+      }
+      const exempt = once ? R.giftOnce : R.giftYear, taxable = Math.max(0, total - exempt);
+      const tax = Math.min(taxable, R.giftBracket) * 0.10 + Math.max(0, taxable - R.giftBracket) * 0.20;
+      inY.forEach(r => { r.tax = total > 0 ? tax * r.eur / total : 0; r.nlTaxed = true; });
+      nlYears.push({ key: grp[0], y, total, exempt, once, taxable, tax, file: once || total > R.giftYear, room: Math.max(0, exempt - total), R });
+    });
+  });
+  /* UK side, in pounds, per tax year from 6 April. Each parent has £3.000 a year, and one unused year carries over. */
+  const ukRows = rows.filter(r => r.uk);
+  let curTY = null, curLeft = 0, carry = 0;
+  ukRows.forEach(r => {
+    const ty = r.m >= 4 ? r.y : r.y - 1;
+    if (ty !== curTY){
+      carry = curTY === null ? (gs.ukCarry ? UK_IHT.annual * D : 0) : (ty === curTY + 1 ? curLeft : 0);
+      curTY = ty; curLeft = UK_IHT.annual * D;
+    }
+    let left = r.amt;
+    const w = r.wedding ? Math.min(left, (r.to === 'charlotte' ? UK_IHT.wedChild : UK_IHT.wedOther) * D) : 0; left -= w;
+    const a = Math.min(left, curLeft); curLeft -= a; left -= a;
+    const c = Math.min(left, carry); carry -= c; left -= c;
+    r.ukExempt = w + a + c; r.pet = left; r.freeY = r.y + 7; r.freeM = r.m;
+  });
+  const lastWhen = ukRows.length ? ukRows[ukRows.length - 1].when : 0;
+  const live = ukRows.filter(r => r.pet > 0 && r.when > lastWhen - 7 && r.when + 7 > now);
+  const cumPet = live.reduce((s, r) => s + r.pet, 0), band = UK_IHT.nrb * D;
+  const lastFree = live.length ? live[live.length - 1] : null;
+  rows.forEach(r => { r.net = r.eur - r.tax; });
+  return { rows, nlYears, warnings, fx, gs,
+    uk: { donors: D, band, cumPet, exemptNow: ukRows.reduce((s, r) => s + (r.ukExempt || 0), 0), total: ukRows.reduce((s, r) => s + r.amt, 0),
+      excess: Math.max(0, cumPet - band), worstTax: Math.max(0, cumPet - band) * UK_IHT.rate, bandUsed: Math.min(cumPet, band), lastFree },
+    nlTax: rows.reduce((s, r) => s + r.tax, 0) };
+}
+/* Gifts still to come that get invested, as one-off amounts for a lens's projection. After Dutch tax. */
+function giftLumps(data, lens){
+  if (!data || !(data.gifts || []).length) return [];
+  return giftLedger(data).rows.filter(r => r.future && r.use === 'invest' && r.net > 0 && (lens === 'ours' || r.to === lens))
+    .map(r => ({ year: r.y, when: r.when, amount: r.net, gift: true, uk: r.uk, to: r.to,
+      label: (r.uk ? 'Gift from Charlotte’s parents' : 'Gift from Sven’s parents') }));
+}
+
+/* ---- mortgage for a next home. Maximum on income, what a given home costs, and what it does monthly. ---- */
+const MC_DEFAULTS = { mode:'joint', grossSven:0, grossCh:0, rate:4.2, fixedYears:10, termYears:30, type:'annuity', price:475000, label:'B',
+  duoSven:null, debtCh:0, starterSven:false, starterCh:true, otherCosts:5500, month:'2027-09', sellHome:true, sellCostsPct:1.5,
+  useFlat:true, extraOwn:0, nhg:true };
+function mcSettings(data){ return { ...MC_DEFAULTS, ...((data && data.mortgageCalc) || {}) }; }
+function mortgageModel(data, over){
+  const s = { ...mcSettings(data), ...(over || {}) };
+  const fp = data.fireParams || {}, cp = chProfile(fp), p = data.property || {};
+  const ym = ymParts(s.month, TODAY.getFullYear() + 1, 6), year = ym[0], R = nlRules(year);
+  const withS = s.mode !== 'charlotte', withC = s.mode !== 'sven', single = s.mode !== 'joint';
+  const gS = Number(s.grossSven) > 0 ? Number(s.grossSven) : grossFromNet((data.income || {}).sven || 0);
+  const gC = Number(s.grossCh) > 0 ? Number(s.grossCh) : (Number(cp.grossSalary) || 0);
+  const income = (withS ? gS : 0) + (withC ? gC : 0);
+  const loanS = (data.liabilities || []).filter(l => l.kind === 'loan' && (l.owner || 'sven') === 'sven').reduce((t, l) => t + (Number(l.monthlyPayment) || 0), 0);
+  const debtS = s.duoSven != null ? (Number(s.duoSven) || 0) : loanS;
+  const debtM = (withS ? debtS : 0) + (withC ? (Number(s.debtCh) || 0) : 0);
+  const rate = Math.max(0, Number(s.rate) || 0), term = Math.max(5, Math.min(30, Math.round(Number(s.termYears) || 30)));
+  const price = Math.max(0, Number(s.price) || 0);
+  const labelBonus = LABEL_BONUS[s.label] || 0, singleBonus = single && income >= 31000 ? R.single : 0;
+  const maxAt = rt => {
+    const test = (Number(s.fixedYears) || 0) < 10 ? Math.max(rt, 5) : rt, wq = woonquote(income, test, year);
+    const debtY = debtM * 12 * debtFactor(test), allowedY = Math.max(0, income * wq / 100 - debtY);
+    const onIncome = allowedY / (annuityM(1, test, 360) * 12);
+    return { test, wq, debtY, allowedY, onIncome, max: onIncome + labelBonus + singleBonus };
+  };
+  const M = maxAt(rate);
+  /* own money */
+  const purchaseDate = new Date(year, ym[1] - 1, 15);
+  const buyers = [];
+  if (withS) buyers.push({ id:'sven', name:'Sven', age: ageOn(fp.birthYear, fp.birthMD, purchaseDate), starter: !!s.starterSven });
+  if (withC) buyers.push({ id:'charlotte', name:'Charlotte', age: ageOn(cp.birthYear, cp.birthMD, purchaseDate), starter: !!s.starterCh });
+  const homeSale = (withS && s.sellHome) ? Math.max(0, (p.value || 0) * (1 - (Number(s.sellCostsPct) || 0) / 100) - (p.mortgageBalance || 0)) : 0;
+  const sale = chSale(data);
+  const flatHome = (withC && s.useFlat && sale.active) ? sale.toHome : 0;
+  const gl = giftLedger(data);
+  const giftRows = gl.rows.filter(g => g.use === 'home' && ((g.to === 'sven' && withS) || (g.to === 'charlotte' && withC)));
+  const giftHome = giftRows.reduce((t, g) => t + g.net, 0);
+  const extraOwn = Math.max(0, Number(s.extraOwn) || 0);
+  const own = homeSale + flatHome + giftHome + extraOwn;
+  const otherCosts = Math.max(0, Number(s.otherCosts) || 0);
+  const at = P => {
+    const bs = buyers.map(b => { const exempt = b.starter && b.age < 35 && P <= R.starter; return { ...b, exempt, tax: exempt ? 0 : P * 0.02 / buyers.length }; });
+    const transferTax = bs.reduce((t, b) => t + b.tax, 0);
+    let loan = Math.max(0, P + transferTax + otherCosts - own), nhgFee = 0, nhgOk = false;
+    for (let i = 0; i < 4; i++){
+      nhgOk = s.nhg !== false && P <= R.nhg && loan <= R.nhg && loan > 0;
+      nhgFee = nhgOk ? loan * 0.004 : 0;
+      loan = Math.max(0, P + transferTax + otherCosts + nhgFee - own);
+    }
+    const cap = Math.min(M.max, P), used = Math.min(loan, cap);
+    return { buyers: bs, transferTax, nhgFee, nhgOk, need: loan, cap, used, short: Math.max(0, loan - cap),
+      total: P + transferTax + otherCosts + nhgFee, spare: Math.max(0, own - (P + transferTax + otherCosts + nhgFee)) };
+  };
+  const A = at(price);
+  let lo = 0, hi = 3000000;
+  for (let i = 0; i < 40; i++){ const mid = (lo + hi) / 2; if (at(mid).short <= 0.5) lo = mid; else hi = mid; }
+  const maxPrice = Math.floor(lo / 1000) * 1000;
+  /* payments */
+  const hra = R.hra / 100, ewfY = price * 0.0035 * hra, L = A.used, n = term * 12, r = rate / 1200;
+  const payOf = (loan, rt) => s.type === 'linear' ? loan / n + loan * rt / 1200 : annuityM(loan, rt, n);
+  const years = []; let bal = L;
+  const annuity = annuityM(L, rate, n);
+  for (let y = 0; y < term; y++){
+    let int = 0, prin = 0;
+    for (let k = 0; k < 12; k++){ const i = bal * r, pr = s.type === 'linear' ? L / n : Math.min(bal, annuity - i); int += i; prin += pr; bal = Math.max(0, bal - pr); }
+    years.push({ yr: y + 1, year: year + y, interest: Math.round(int), principal: Math.round(prin), net: Math.round(int + prin - int * hra + ewfY), balance: Math.round(bal) });
+  }
+  const grossM = payOf(L, rate), netM = years.length ? years[0].net / 12 : 0;
+  const totalInterest = years.reduce((t, y) => t + y.interest, 0);
+  /* today's home, for comparison */
+  const nowRate = Number(p.interestRate) || 3, nowInt = (p.mortgageBalance || 0) * nowRate / 100;
+  const hraNow = nlRules(TODAY.getFullYear()).hra / 100;
+  const nowNetM = MORTGAGE_PAYMENT - (nowInt * hraNow - (p.value || 0) * 0.0035 * hraNow) / 12;
+  const sens = [-1, 0, 1].map(d => { const rt = Math.max(0.5, rate + d); return { d, rate: rt, max: maxAt(rt).max, pay: payOf(L, rt) }; });
+  return { s, R, year, month: ym[1], withS, withC, single, gS, gC, income, debtS, debtM, rate, term, price, labelBonus, singleBonus, M,
+    buyers: A.buyers, transferTax: A.transferTax, nhgFee: A.nhgFee, nhgOk: A.nhgOk, otherCosts, total: A.total, need: A.need, cap: A.cap,
+    loan: L, short: A.short, spare: A.spare, maxPrice, own, homeSale, flatHome, giftHome, giftRows, extraOwn, sale,
+    grossM, netM, years, totalInterest, ewfY, hra, nowNetM, nowGrossM: MORTGAGE_PAYMENT, sens, ltv: price > 0 ? L / price * 100 : 0 };
+}
+/* What the new home does to the FI date of the people buying it. */
+function mortgageFiEffect(data, m){
+  const lens = m.s.mode === 'joint' ? 'ours' : m.s.mode;
+  const plan = planFor(data, lens);
+  const base = simulate(plan.pot, plan.fp, plan.g, plan.infl);
+  /* the plan carries today's mortgage at its gross payment, so the new home enters as the change in net cost */
+  const fullY = (Number((data.fireParams || {}).housingSpend) || 0) * 2;
+  const alt = simulate(plan.pot, { ...plan.fp, housingSpend: Math.max(0, fullY + (m.netM - m.nowNetM) * 12), housingSolo: false,
+    housingEndYear: m.year + m.term - 1 }, plan.g, plan.infl);
+  return { lens, base, alt, months: (base.fireAgeX !== null && alt.fireAgeX !== null) ? (alt.fireAgeX - base.fireAgeX) * 12 : null };
+}
+
 function planFor(data, lens){
   const fp = data.fireParams || {};
   const A = lensItems(data.assets, lens, data);
   const pot = investableOf(A);
   const g = Number(fp.grossReturn) || 0, infl = fp.inflation != null ? Number(fp.inflation) : 2.5;
   const vol = Number(fp.mcVol) > 0 ? Number(fp.mcVol) : potVolatility(A);
-  if (!lens || lens === 'sven')
-    return { lens:'sven', who:'Sven', fp, pot, A, g, infl, vol, spendTotal: (Number(fp.annualWithdrawal) || 0) + (Number(fp.housingSpend) || 0) * (fp.housingSolo ? 2 : 1) };
+  if (!lens || lens === 'sven'){
+    const gS = giftLumps(data, 'sven');
+    const fpS = gS.length ? { ...fp, lumpSums: (fp.lumpSums || []).concat(gS) } : fp;
+    return { lens:'sven', who:'Sven', fp: fpS, giftLumps: gS, pot, A, g, infl, vol, spendTotal: (Number(fp.annualWithdrawal) || 0) + (Number(fp.housingSpend) || 0) * (fp.housingSolo ? 2 : 1) };
+  }
+  const gifted = giftLumps(data, lens);
   const ch = charlottePlan(data), sale = chSale(data), step = chStepUp(data, ch, sale);
   const chContrib = Number(fp.charlotteContribution) || 0;
   const lumps = (sale && sale.active && sale.toInvest > 0)
@@ -3981,8 +4205,8 @@ function planFor(data, lens){
     const fpC = { ...fp, birthYear: ch.cp.birthYear, birthMD: ch.cp.birthMD, targetAge: ch.cp.targetAge,
       monthlyContribution: chContrib, contributionSchedule: step ? [{ fromAge: chAx + step.years, monthly: step.monthly }] : [],
       annualWithdrawal: chCore, housingSpend: chPaysHalf ? h : 0, housingSolo: false, reserveYears: 0,
-      aowEnabled: false, occPensions: { enabled:false, streams:[] }, extraStreams: [], lumpSums: lumps, box3Persons: 1 };
-    return { lens, who:'Charlotte', fp: fpC, pot, A, g, infl, vol, ch, sale, step, lumps, spendTotal: ch.spendY, chPaysHalf };
+      aowEnabled: false, occPensions: { enabled:false, streams:[] }, extraStreams: [], lumpSums: lumps.concat(gifted), box3Persons: 1 };
+    return { lens, who:'Charlotte', fp: fpC, giftLumps: gifted, pot, A, g, infl, vol, ch, sale, step, lumps, spendTotal: ch.spendY, chPaysHalf };
   }
   const ax = exactAge(fp.birthYear, fp.birthMD);
   const svenCore = Number(fp.annualWithdrawal) || 0, mortgageY = h * 2;
@@ -4001,8 +4225,8 @@ function planFor(data, lens){
     { kind:'partner', startAge: pStart, indexed: true, isNet: true, gross: (Number(pc.employerNet) || 0) * 12 * factor }];
   const fpH = { ...fp, annualWithdrawal: core, housingSpend: mortgageY, housingSolo: false,
     monthlyContribution: (Number(fp.monthlyContribution) || 0) + chContrib, contributionSchedule: sched,
-    lumpSums: (fp.lumpSums || []).concat(lumps), extraStreams: extra, box3Persons: 2 };
-  return { lens:'ours', who:'Household', fp: fpH, pot, A, g, infl, vol, ch, sale, step, lumps, spendTotal: core + mortgageY,
+    lumpSums: (fp.lumpSums || []).concat(lumps).concat(gifted), extraStreams: extra, box3Persons: 2 };
+  return { lens:'ours', who:'Household', fp: fpH, giftLumps: gifted, pot, A, g, infl, vol, ch, sale, step, lumps, spendTotal: core + mortgageY,
     spend: { svenCore, chCore, mortgageY, core, total: core + mortgageY, override: override > 0, derived },
     chPensionNet: extra.reduce((s, x) => s + x.gross, 0), pStart };
 }
@@ -4833,6 +5057,306 @@ function HouseholdPropertyCard({ data }){
   );
 }
 
+/* ============================ v57 · Property tab: mortgage calculator and gifts ============================ */
+function MortgageCard({ data, setData }){
+  const m = mortgageModel(data), s = m.s;
+  const set = patch => setData({ ...data, mortgageCalc: { ...(data.mortgageCalc || {}), ...patch } });
+  const fx = useDeferred(() => mortgageFiEffect(data, m), JSON.stringify([data.mortgageCalc, data.gifts, data.giftSettings, data.fireParams, data.property, data.income, m.netM]));
+  const fits = m.short <= 0.5;
+  const who = m.s.mode === 'joint' ? 'together' : m.s.mode === 'sven' ? 'Sven alone' : 'Charlotte alone';
+  const tip = o => {
+    if (!o || !o.active || !o.payload || !o.payload.length) return null;
+    const r = o.payload[0].payload;
+    return (
+      <div className="tipbox">
+        <div style={{fontWeight:700, marginBottom:3}}>Year {r.yr} · {r.year}</div>
+        <div>Interest <b className="num">{fmt0(r.interest)}</b></div>
+        <div>Repaid <b className="num">{fmt0(r.principal)}</b></div>
+        <div>Net cost after tax <b className="num">{fmt0(r.net)}</b> <span className="dim">· {fmt0(r.net / 12)}/mo</span></div>
+        <div className="dim">Left at the end of the year {fmt0(r.balance)}</div>
+      </div>
+    );
+  };
+  const chk = (key, label, on) => (
+    <label className="row small" style={{gap:8, cursor:'pointer'}}>
+      <input type="checkbox" checked={on} onChange={e => set({ [key]: e.target.checked })}/> {label}</label>
+  );
+  return (
+    <div className="card">
+      <div className="spread" style={{flexWrap:'wrap', gap:8}}>
+        <h2 style={{margin:0}}>🏡 Mortgage calculator · the next home</h2>
+        <Seg value={s.mode} onChange={v => set({ mode: v })} options={[['joint', 'Together'], ['sven', 'Sven alone'], ['charlotte', 'Charlotte alone']]}/>
+      </div>
+      <div className="sub mb">What a lender allows on income, what a given home really costs, and what it does to the month and to the FI date. Rules for {m.year <= 2026 ? 2026 : 2027}{m.year >= 2027 ? ', still a proposal' : ''}.</div>
+
+      <div className="grid3">
+        <div className="statbox big">
+          <div className="mono-lab">Maximum mortgage, {who}</div>
+          <div className="sv"><CountUp value={m.M.max} format={fmt0}/></div>
+          <div className="sub">on {fmt0(m.income)} gross a year · estimate, an adviser has the exact table</div>
+        </div>
+        <div className="statbox big">
+          <div className="mono-lab">Mortgage for this home</div>
+          <div className="sv" style={{color: fits ? 'var(--green)' : 'var(--red)'}}><CountUp value={m.loan} format={fmt0}/></div>
+          <div className="sub">{fits ? pct1(m.ltv) + ' of the price' + (m.nhgOk ? ' · with NHG' : '') : fmt0(m.short) + ' short, see below'}</div>
+        </div>
+        <div className="statbox big">
+          <div className="mono-lab">Net a month, first year</div>
+          <div className="sv"><CountUp value={m.netM} format={fmt0}/></div>
+          <div className="sub">{fmt0(m.grossM)} gross · now {fmt0(m.nowNetM)} net on Orchislaan</div>
+        </div>
+      </div>
+
+      <div className={'verdict ' + (fits ? 'ok' : 'no')}>
+        {fits
+          ? <span>✓ A home of {fmt0(m.price)} fits. The most you could buy with this own money is about <b className="num">{fmt0(m.maxPrice)}</b>.{m.spare > 0 ? ' You keep ' + fmt0(m.spare) + ' of own money.' : ''}</span>
+          : <span>✗ {fmt0(m.short)} short for {fmt0(m.price)}. {m.need > m.price ? 'A lender finances at most the value of the home, so costs come from own money. ' : ''}With this own money the ceiling is about <b className="num">{fmt0(m.maxPrice)}</b>.</span>}
+      </div>
+
+      <h4 style={{margin:'16px 0 6px'}}>The home and the loan</h4>
+      <div className="form-grid">
+        <label className="fld">Purchase price<NumInput value={s.price} step={5000} width={120} onChange={v => set({ price: v })}/></label>
+        <label className="fld">Transfer date<input type="month" value={s.month} onChange={e => set({ month: e.target.value })}/></label>
+        <label className="fld">Energy label
+          <select value={s.label} onChange={e => set({ label: e.target.value })}>{Object.keys(LABEL_BONUS).map(k => <option key={k} value={k}>{k}{LABEL_BONUS[k] ? ' · +' + fmt0(LABEL_BONUS[k]) : ''}</option>)}</select></label>
+        <label className="fld">Interest rate<NumInput value={s.rate} step={0.05} width={84} suffix="%" onChange={v => set({ rate: v })}/></label>
+        <label className="fld">Fixed for<NumInput value={s.fixedYears} step={1} width={70} suffix="years" onChange={v => set({ fixedYears: v })}/></label>
+        <label className="fld">Term<NumInput value={s.termYears} step={1} width={70} suffix="years" onChange={v => set({ termYears: v })}/></label>
+        <label className="fld">Type<Seg value={s.type} onChange={v => set({ type: v })} options={[['annuity', 'Annuity'], ['linear', 'Linear']]}/></label>
+      </div>
+      <h4 style={{margin:'16px 0 6px'}}>Income and debts</h4>
+      <div className="form-grid">
+        {m.withS && <label className="fld">Sven, gross a year<NumInput value={m.gS} step={500} width={120} onChange={v => set({ grossSven: v })}/></label>}
+        {m.withC && <label className="fld">Charlotte, gross a year<NumInput value={m.gC} step={500} width={120} onChange={v => set({ grossCh: v })}/></label>}
+        {m.withS && <label className="fld">Sven, loans a month<NumInput value={m.debtS} step={10} width={90} suffix="€/mnd" onChange={v => set({ duoSven: v })}/></label>}
+        {m.withC && <label className="fld">Charlotte, loans a month<NumInput value={s.debtCh} step={10} width={90} suffix="€/mnd" onChange={v => set({ debtCh: v })}/></label>}
+      </div>
+      {m.withS && !(Number(s.grossSven) > 0) && <div className="sub">Sven’s gross is worked back from his net pay. Put in the real figure with holiday pay and fixed 13th month, and after the promotion the new salary.</div>}
+
+      <div className="grid2 mt">
+        <div>
+          <h4 style={{margin:'0 0 6px'}}>What it costs</h4>
+          <div className="kv"><span className="k">Purchase price</span><span className="v">{fmt0(m.price)}</span></div>
+          {m.buyers.map(b => <div key={b.id} className="kv"><span className="k">Transfer tax, {b.name} <span className="dim small">{b.exempt ? 'starter exemption' : !b.starter ? '2% on his or her half' : b.age >= 35 ? '35 or older by then' : 'price above ' + fmt0(m.R.starter)}</span></span><span className="v">{fmt0(b.tax)}</span></div>)}
+          <div className="kv"><span className="k">Notary, adviser, valuation</span><span className="v"><NumInput value={s.otherCosts} step={250} width={90} onChange={v => set({ otherCosts: v })}/></span></div>
+          <div className="kv"><span className="k">NHG fee <span className="dim small">{m.nhgOk ? '0,4% of the loan' : 'not available above ' + fmt0(m.R.nhg)}</span></span><span className="v">{fmt0(m.nhgFee)}</span></div>
+          <div className="kv" style={{borderTop:'1px solid var(--surface2)', paddingTop:6}}><span className="k" style={{fontWeight:700}}>Total</span><span className="v" style={{fontWeight:800}}>{fmt0(m.total)}</span></div>
+          <div className="row" style={{gap:14, flexWrap:'wrap', marginTop:8}}>
+            {m.withS && chk('starterSven', 'Sven still has his starter exemption', !!s.starterSven)}
+            {m.withC && chk('starterCh', 'Charlotte still has hers', !!s.starterCh)}
+            {chk('nhg', 'Use NHG when possible', s.nhg !== false)}
+          </div>
+        </div>
+        <div>
+          <h4 style={{margin:'0 0 6px'}}>Where the money comes from</h4>
+          {m.withS && <div className="kv"><span className="k">Orchislaan, after selling <span className="dim small">today’s value and balance, {pct1(Number(s.sellCostsPct) || 0)} costs</span></span><span className="v">{fmt0(m.homeSale)}</span></div>}
+          {m.withC && <div className="kv"><span className="k">London flat, the part for a home <span className="dim small">{m.sale.active ? 'from her sale plan' : 'no sale planned'}</span></span><span className="v">{fmt0(m.flatHome)}</span></div>}
+          <div className="kv"><span className="k">Gifts marked for the home <span className="dim small">{m.giftRows.length ? m.giftRows.length + ' in the gifts card' : 'none yet'}</span></span><span className="v">{fmt0(m.giftHome)}</span></div>
+          <div className="kv"><span className="k">Other savings you put in</span><span className="v"><NumInput value={s.extraOwn} step={1000} width={100} onChange={v => set({ extraOwn: v })}/></span></div>
+          <div className="kv"><span className="k">Mortgage</span><span className="v">{fmt0(m.loan)}</span></div>
+          {!fits && <div className="kv"><span className="k red">Still missing</span><span className="v red">{fmt0(m.short)}</span></div>}
+          <div className="row" style={{gap:14, flexWrap:'wrap', marginTop:8}}>
+            {m.withS && chk('sellHome', 'Sell Orchislaan', !!s.sellHome)}
+            {m.withC && chk('useFlat', 'Use the flat money', !!s.useFlat)}
+          </div>
+        </div>
+      </div>
+
+      <h4 style={{margin:'16px 0 6px'}}>How the maximum is built</h4>
+      <div className="buildrow">
+        <div className="buildcell"><div className="mono-lab">Income</div><div className="num">{fmt0(m.income)}</div></div>
+        <div className="buildop">×</div>
+        <div className="buildcell"><div className="mono-lab">May go to housing</div><div className="num">{pct1(m.M.wq)}</div></div>
+        {m.M.debtY > 0 && <React.Fragment><div className="buildop">−</div>
+          <div className="buildcell"><div className="mono-lab">Loans</div><div className="num">{fmt0(m.M.debtY)}/yr</div></div></React.Fragment>}
+        <div className="buildop">→</div>
+        <div className="buildcell"><div className="mono-lab">At {pct1(m.M.test)} over 30 years</div><div className="num">{fmt0(m.M.onIncome)}</div></div>
+        {m.labelBonus > 0 && <React.Fragment><div className="buildop">+</div><div className="buildcell"><div className="mono-lab">Label {s.label}</div><div className="num">{fmt0(m.labelBonus)}</div></div></React.Fragment>}
+        {m.singleBonus > 0 && <React.Fragment><div className="buildop">+</div><div className="buildcell"><div className="mono-lab">Buying alone</div><div className="num">{fmt0(m.singleBonus)}</div></div></React.Fragment>}
+      </div>
+      {m.M.debtY > 0 && <div className="sub">Loans of {fmt0(m.debtM)} a month take about {fmt0(m.M.debtY / (annuityM(1, m.M.test, 360) * 12))} off the maximum. Paying the student loan off before applying gives that back.</div>}
+      {(Number(s.fixedYears) || 0) < 10 && <div className="sub">With the rate fixed for less than 10 years a lender tests at 5% or the real rate, whichever is higher.</div>}
+
+      {m.loan > 0 && <React.Fragment>
+        <h4 style={{margin:'16px 0 4px'}}>Every year of the loan</h4>
+        <div style={{width:'100%', height:230}}>
+          <ResponsiveContainer>
+            <ComposedChart data={m.years} margin={{top:8, right:8, left:4, bottom:0}} barCategoryGap={1}>
+              <CartesianGrid stroke="var(--rule)" strokeDasharray="3 3"/>
+              <XAxis dataKey="year" tick={{fontSize:11, fill:'var(--muted)'}}/>
+              <YAxis tickFormatter={kEur} tick={{fontSize:11, fill:'var(--muted)'}} width={50}/>
+              <Tooltip content={tip}/>
+              <Bar dataKey="interest" stackId="p" fill="var(--red)" fillOpacity={0.6} animationDuration={700}/>
+              <Bar dataKey="principal" stackId="p" fill="var(--green)" animationDuration={800} animationBegin={150}/>
+              <Line type="monotone" dataKey="net" stroke="var(--text)" strokeWidth={1.8} dot={false} animationDuration={1100} animationBegin={300}/>
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="row small" style={{gap:14, flexWrap:'wrap', marginTop:4}}>
+          <span><i className="lg" style={{background:'var(--red)', opacity:.6}}/>interest</span>
+          <span><i className="lg" style={{background:'var(--green)'}}/>repaid</span>
+          <span><i className="lg" style={{background:'var(--text)'}}/>net cost after the interest deduction</span>
+          <span className="dim">{fmt0(m.totalInterest)} interest over {m.term} years</span>
+        </div>
+        <div className="mono-lab" style={{margin:'14px 0 5px'}}>If the rate moves a point</div>
+        <div className="marginrow" style={{gridTemplateColumns:'repeat(3,1fr)'}}>
+          {m.sens.map(x => (
+            <div key={x.d} className={'margincell' + (x.d === 0 ? ' on' : '')}>
+              <div className="mono-lab">{pct1(x.rate)}</div>
+              <div className="num" style={{fontWeight:700}}>{fmt0(x.pay)}/mo</div>
+              <div className="num small dim">max {fmt0(x.max)}</div>
+            </div>
+          ))}
+        </div>
+      </React.Fragment>}
+
+      <div className="grid2 mt">
+        <div className="statbox">
+          <div className="mono-lab">Against today</div>
+          <div className="kv"><span className="k">Net a month now</span><span className="v">{fmt0(m.nowNetM)}</span></div>
+          <div className="kv"><span className="k">Net a month then</span><span className="v">{fmt0(m.netM)}</span></div>
+          <div className="kv"><span className="k">Difference</span><span className={'v ' + (m.netM > m.nowNetM ? 'red' : 'green')}>{m.netM > m.nowNetM ? '+' : '−'}{fmt0(Math.abs(m.netM - m.nowNetM))}</span></div>
+        </div>
+        <div className="statbox">
+          <div className="mono-lab">Effect on the FI date · {m.s.mode === 'joint' ? 'Ours' : m.s.mode === 'sven' ? 'Me' : 'Charlotte'}</div>
+          {!fx ? <div className="sv dim">…</div> : <React.Fragment>
+            <div className="sv" style={{fontSize:20}}>{fx.months === null ? 'beyond the horizon' : Math.abs(fx.months) < 0.5 ? 'no change' : <span className={fx.months > 0 ? 'red' : 'green'}>{spanTxt(fx.months)} {fx.months > 0 ? 'later' : 'sooner'}</span>}</div>
+            <div className="sub">{fx.base.fireAgeX !== null ? 'FI at ' + ageYM(fx.base.fireAgeX) : 'not reached'} now, {fx.alt.fireAgeX !== null ? ageYM(fx.alt.fireAgeX) : 'not reached'} with this home. Only the housing cost changes here.</div>
+          </React.Fragment>}
+        </div>
+      </div>
+      <div className="sub mt">The ceiling follows income. Sale money and gifts raise your own money, never the amount a lender allows. Profit from selling Orchislaan has to go into the new home, or the interest on that part of the loan is not deductible. The London flat falls outside that rule. A new job counts once the employer signs a statement of intent. While the flat is still hers its mortgage counts as a debt, so selling first helps. Figures as known on {HOME_ASOF}. The 2027 lending rules, NHG limit of {fmt0(NL_RULES[2027].nhg)}, starter limit of {fmt0(NL_RULES[2027].starter)} and deduction rate of {pct1(NL_RULES[2027].hra)} still have to pass.</div>
+    </div>
+  );
+}
+
+function GiftNote({ plan }){
+  const g = (plan && plan.giftLumps) || [];
+  if (!g.length) return null;
+  return (
+    <div className="card" style={{borderStyle:'dashed', padding:'12px 16px'}}>
+      <span className="small">🎁 Counted in this plan. {g.map((x, i) => (x.uk ? '🇬🇧 ' : '🇳🇱 ') + fmt0(x.amount) + ' in ' + x.year).join(' · ')}. <span className="dim">Change them under Property, gifts from parents.</span></span>
+    </div>
+  );
+}
+
+function GiftsCard({ data, setData, lens }){
+  const L = giftLedger(data), gs = L.gs, fp = data.fireParams || {}, p = data.property || {};
+  const gifts = data.gifts || [];
+  const setGifts = next => setData({ ...data, gifts: next });
+  const upd = (id, patch) => setGifts(gifts.map(g => g.id === id ? { ...g, ...patch } : g));
+  const setGS = patch => setData({ ...data, giftSettings: { ...(data.giftSettings || {}), ...patch } });
+  const nowYM = ISO(TODAY).slice(0, 7), y0 = TODAY.getFullYear(), R0 = nlRules(y0), R1 = nlRules(y0 + 1);
+  const add = g => setGifts(gifts.concat([{ id: uid(), date: nowYM, use:'invest', ...g }]));
+  const USES = [['invest', 'Invest it'], ['home', 'Own money for a home'], ['mortgage', 'Pay off the mortgage'], ['spend', 'Spend or save it']];
+  const nlThis = L.nlYears.filter(x => x.key === 'nl' && x.y === y0)[0];
+  const nlRoom = nlThis ? nlThis.room : R0.giftYear;
+  const onceUsed = L.nlYears.some(x => x.once);
+  const svenTurns40 = (Number(fp.birthYear) || 1997) + 40;
+  /* effect on the FI date, per lens, each on its own money */
+  const key = JSON.stringify([data.gifts, data.giftSettings, data.fireParams, data.assets, (data.fx || {}).GBP]);
+  const eff = useDeferred(() => [['sven', 'Me'], ['charlotte', 'Charlotte'], ['ours', 'Ours']].map(l => {
+    const plan = planFor(data, l[0]);
+    if (!(plan.giftLumps || []).length) return { id: l[0], name: l[1], none: true };
+    const a = simulate(plan.pot, plan.fp, plan.g, plan.infl);
+    const b = simulate(plan.pot, { ...plan.fp, lumpSums: (plan.fp.lumpSums || []).filter(x => !x.gift) }, plan.g, plan.infl);
+    return { id: l[0], name: l[1], withG: a, without: b, sum: plan.giftLumps.reduce((t, x) => t + x.amount, 0),
+      months: (a.fireAgeX !== null && b.fireAgeX !== null) ? (b.fireAgeX - a.fireAgeX) * 12 : null,
+      dReal: a.realAtTarget - b.realAtTarget, target: plan.fp.targetAge };
+  }), key);
+  const repay = L.rows.filter(r => r.future && r.use === 'mortgage' && r.to === 'sven').reduce((t, r) => t + r.net, 0);
+  const rate = Number(p.interestRate) || 3;
+  const am0 = repay > 0 ? amortize(p.mortgageBalance || 0, rate, MORTGAGE_PAYMENT, 0) : null;
+  const am1 = repay > 0 ? amortize(Math.max(0, (p.mortgageBalance || 0) - repay), rate, MORTGAGE_PAYMENT, 0) : null;
+  const hra = nlRules(y0).hra / 100;
+  const homeSum = L.rows.filter(r => r.use === 'home').reduce((t, r) => t + r.net, 0);
+  const line = r => {
+    if (!r.uk || r.nlTaxed){
+      const yr = L.nlYears.filter(x => x.key === (r.uk ? 'uk' : 'nl') && x.y === r.y)[0];
+      const base = r.tax > 0.5
+        ? <span><b className="red">{fmt0(r.tax)} Dutch gift tax</b>, {fmt0(r.net)} arrives. {yr ? fmt0(yr.exempt) + ' of ' + fmt0(yr.total) + ' in ' + r.y + ' is free' + (yr.once ? ' with the one-time exemption' : '') + '.' : ''}</span>
+        : <span><b className="green">No tax.</b> {yr ? 'Inside the ' + fmt0(yr.exempt) + (yr.once ? ' one-time' : ' yearly') + ' exemption for ' + r.y + (yr.room > 0 ? ', ' + fmt0(yr.room) + ' still free' : '') + '.' : ''}</span>;
+      return <span>{base}{yr && yr.file ? ' File a gift tax return before 1 March ' + (r.y + 1) + '.' : ''}</span>;
+    }
+    return (
+      <span><b className="green">No tax to pay.</b> No Dutch gift tax because they live in the UK, and the UK has none. {r.ukExempt > 0 ? gbpfmt(r.ukExempt) + ' is outside UK inheritance tax at once. ' : ''}
+        {r.pet > 0 ? gbpfmt(r.pet) + ' clears in ' + fmtYM(r.freeY, r.freeM) + ', seven years on.' : ''} <span className="dim">≈ {fmt0(r.eur)} at {String(L.fx).replace('.', ',')}</span></span>
+    );
+  };
+  return (
+    <div className="card">
+      <div className="spread" style={{flexWrap:'wrap', gap:8}}>
+        <h2 style={{margin:0}}>🎁 Gifts from parents</h2>
+        <span className="chip">🇳🇱 Dutch gift tax · 🇬🇧 UK seven-year rule</span>
+      </div>
+      <div className="sub mb">Two countries, two sets of rules. Your parents give under Dutch gift tax, where the person receiving pays above the exemption. Charlotte’s parents give from the UK in pounds. That gift is free of Dutch tax and has no UK tax when it is made. It only matters for UK inheritance tax if a parent dies within seven years.</div>
+
+      {gifts.length === 0 && <div className="sub mb">No gifts planned yet. Add one to see the tax and what it does to the FI date or the mortgage.</div>}
+      {L.rows.map(r => (
+        <div key={r.id} className="giftrow reveal-in">
+          <div className="gift-top">
+            <span className="gift-flag">{r.uk ? '🇬🇧' : '🇳🇱'}</span>
+            <span className="gift-who">{r.uk ? 'Charlotte’s parents' : 'Sven’s parents'} <span className="dim">to</span></span>
+            <select value={r.to} onChange={e => upd(r.id, { to: e.target.value })}><option value="sven">Sven</option><option value="charlotte">Charlotte</option></select>
+            <NumInput value={r.amt} step={r.uk ? 500 : 500} width={110} suffix={r.uk ? '£' : '€'} onChange={v => upd(r.id, { amount: v })}/>
+            <input type="month" value={r.date || nowYM} onChange={e => upd(r.id, { date: e.target.value })}/>
+            <select value={r.use} onChange={e => upd(r.id, { use: e.target.value })}>{USES.map(u => <option key={u[0]} value={u[0]}>{u[1]}</option>)}</select>
+            {!r.uk && <label className="row small" style={{gap:6, cursor:'pointer'}} title="Once in a lifetime, for a child or partner aged 18 to 39"><input type="checkbox" checked={!!r.once} onChange={e => upd(r.id, { once: e.target.checked })}/> one-time higher exemption</label>}
+            {r.uk && <label className="row small" style={{gap:6, cursor:'pointer'}} title="Each parent may give £5.000 to a child for a wedding, £1.000 to someone else"><input type="checkbox" checked={!!r.wedding} onChange={e => upd(r.id, { wedding: e.target.checked })}/> wedding gift</label>}
+            <button className="btn" style={{padding:'2px 9px', marginLeft:'auto'}} onClick={() => setGifts(gifts.filter(g => g.id !== r.id))} title="Remove">🗑</button>
+          </div>
+          <div className="gift-out small">{line(r)}{!r.future ? <span className="dim"> Already received, so it sits in your balances and is not added again.</span> : ''}</div>
+        </div>
+      ))}
+      {L.warnings.map((w, i) => <div key={i} className="sub" style={{color:'var(--red)'}}>{w}</div>)}
+      <div className="row" style={{gap:8, flexWrap:'wrap', marginTop:10}}>
+        <button className="btn" onClick={() => add({ from:'nl', to:'sven', amount: Math.round(nlRoom) || R1.giftYear })}>+ 🇳🇱 Gift from my parents</button>
+        <button className="btn" onClick={() => add({ from:'uk', to:'charlotte', amount: UK_IHT.annual * L.uk.donors * (gs.ukCarry ? 2 : 1) })}>+ 🇬🇧 Gift from Charlotte’s parents</button>
+      </div>
+
+      <div className="grid2 mt">
+        <div className="statbox">
+          <div className="mono-lab">🇳🇱 Free of tax from your parents</div>
+          <div className="kv"><span className="k">Still free in {y0}</span><span className="v green">{fmt0(nlRoom)}</span></div>
+          <div className="kv"><span className="k">Free in {y0 + 1} <span className="dim small">provisional</span></span><span className="v">{fmt0(R1.giftYear)}</span></div>
+          <div className="kv"><span className="k">One-time, instead of a yearly one <span className="dim small">until you turn 40 in {svenTurns40}</span></span><span className="v">{onceUsed ? 'planned' : fmt0(R0.giftOnce)}</span></div>
+          <div className="kv"><span className="k">Above that</span><span className="v">10%, then 20% over {fmt0(R0.giftBracket)}</span></div>
+          <div className="sub">Both parents count as one giver. A gift to Charlotte from your parents is added to yours. December plus January uses two yearly exemptions weeks apart. The old exemption for a home ended in 2024.</div>
+          {L.nlYears.filter(x => x.key === 'nl').map(x => <div key={x.y} className="kv"><span className="k">{x.y} planned</span><span className="v">{fmt0(x.total)} · {x.tax > 0.5 ? <span className="red">{fmt0(x.tax)} tax</span> : <span className="green">no tax</span>}</span></div>)}
+        </div>
+        <div className="statbox">
+          <div className="mono-lab">🇬🇧 From Charlotte’s parents</div>
+          <div className="kv"><span className="k">Outside inheritance tax at once, a year</span><span className="v green">{gbpfmt(UK_IHT.annual * L.uk.donors)}</span></div>
+          <div className="kv"><span className="k">Planned in total</span><span className="v">{gbpfmt(L.uk.total)}</span></div>
+          <div className="kv"><span className="k">Waiting out the seven years</span><span className="v">{gbpfmt(L.uk.cumPet)}</span></div>
+          <div className="kv"><span className="k">All clear by</span><span className="v">{L.uk.lastFree ? fmtYM(L.uk.lastFree.freeY, L.uk.lastFree.freeM) : 'nothing waiting'}</span></div>
+          <div className="kv"><span className="k">Worst case for the receiver <span className="dim small">a parent dies within 3 years</span></span><span className={'v ' + (L.uk.worstTax > 0 ? 'red' : 'green')}>{L.uk.worstTax > 0 ? gbpfmt(L.uk.worstTax) : '£0'}</span></div>
+          <div className="row" style={{gap:12, flexWrap:'wrap', marginTop:8}}>
+            <label className="row small" style={{gap:6, cursor:'pointer'}}><input type="checkbox" checked={L.uk.donors === 2} onChange={e => setGS({ ukDonors: e.target.checked ? 2 : 1 })}/> both parents give</label>
+            <label className="row small" style={{gap:6, cursor:'pointer'}}><input type="checkbox" checked={!!gs.ukCarry} onChange={e => setGS({ ukCarry: e.target.checked })}/> last tax year’s £3.000 unused</label>
+            <label className="row small" style={{gap:6, cursor:'pointer'}}><input type="checkbox" checked={!!gs.ukNeverNL} onChange={e => setGS({ ukNeverNL: e.target.checked })}/> they never lived in the Netherlands</label>
+          </div>
+          <div className="sub">Gifts within seven years of a death first use that parent’s £325.000 tax-free band, earliest first. Only what goes above the band is taxed, at 40% and falling from year three, and the receiver owes it. {L.uk.cumPet > 0 ? 'These gifts use ' + gbpfmt(L.uk.bandUsed) + ' of ' + gbpfmt(L.uk.band) + ', which is band the rest of the estate cannot use in those years.' : ''} Regular gifts out of spare income are free without a limit. The UK tax year runs from 6 April.</div>
+          {!gs.ukNeverNL && <div className="sub" style={{color:'var(--gold)'}}>If they lived here, Dutch gift tax can still apply for a year after leaving, or ten years for Dutch nationals. The gifts above are then taxed the Dutch way.</div>}
+        </div>
+      </div>
+
+      <h4 style={{margin:'16px 0 6px'}}>What the gifts do</h4>
+      {!eff ? <Thinking h={90} label="Rerunning the three plans"/> : <div className="reveal-in">
+        {eff.map(e => (
+          <div key={e.id} className="kv">
+            <span className="k"><b style={{color:'var(--text)'}}>{e.name}</b> {e.none ? <span className="dim">no invested gift in this view</span> : <span className="dim">{fmt0(e.sum)} invested · {fmt0(e.dReal)} more at {e.target} in today’s €</span>}</span>
+            <span className="v">{e.none ? '—' : e.months === null ? (e.withG.fireAgeX !== null ? 'FI at ' + ageYM(e.withG.fireAgeX) : 'beyond the horizon') : Math.abs(e.months) < 0.5 ? 'FI date unchanged' : <span className="green">FI {spanTxt(e.months)} sooner, at {ageYM(e.withG.fireAgeX)}</span>}</span>
+          </div>
+        ))}
+        {homeSum > 0 && <div className="kv"><span className="k"><b style={{color:'var(--text)'}}>Home</b> <span className="dim">own money in the mortgage calculator</span></span><span className="v">{fmt0(homeSum)} less to borrow · about {fmt0(annuityM(homeSum, mcSettings(data).rate, 360))}/mo lower</span></div>}
+        {repay > 0 && am0 && am1 && <div className="kv"><span className="k"><b style={{color:'var(--text)'}}>Orchislaan mortgage</b> <span className="dim">{fmt0(repay)} paid off, same monthly payment</span></span><span className="v">{spanTxt(am0.months - am1.months)} shorter · {fmt0((am0.interestTotal - am1.interestTotal) * (1 - hra))} interest saved after tax</span></div>}
+      </div>}
+      <div className="sub mt">Each view counts only gifts to that person, and Ours counts both. A gift lands in Box 3 on the next 1 January like any other money. Pounds are converted at today’s rate, so the euro amount moves until the transfer. A lender wants a short signed gift letter when a gift is used as own money. Dutch amounts for {y0 + 1} are provisional and the UK left its gift rules unchanged in the Budget of 28 October 2026. As known on {HOME_ASOF}.</div>
+    </div>
+  );
+}
+
 function PropertyTab({ data, setData, lens = 'sven' }){
   const p = data.property;
   const showSven = lensMatch('sven', lens);
@@ -4843,6 +5367,8 @@ function PropertyTab({ data, setData, lens = 'sven' }){
         {otherProps.length === 0
           ? <div className="card"><h2>Property</h2><div className="muted">No property under {OWNERS[lens] || 'this view'}.</div></div>
           : otherProps.map(a => <RentalPropertyCard key={a.id} a={a} data={data} setData={setData}/>)}
+        <MortgageCard data={data} setData={setData}/>
+        <GiftsCard data={data} setData={setData} lens={lens}/>
       </div>
     );
   }
@@ -5032,6 +5558,9 @@ function PropertyTab({ data, setData, lens = 'sven' }){
             </React.Fragment>
           )}
       </div>
+
+      <MortgageCard data={data} setData={setData}/>
+      <GiftsCard data={data} setData={setData} lens={lens}/>
 
       <div className="card" style={{borderStyle:'dashed', padding:'12px 16px'}}>
         <span className="small muted">🇬🇧 Charlotte's London flat (separate GBP asset{chFlat && chFlat.rentGBP ? ', rented out at ' + gbpfmt(chFlat.rentGBP) + '/month gross' : ''}). Tracked separately, not included in this model.</span>
@@ -7231,7 +7760,7 @@ function DashboardTab({ data, lens = 'sven', setTab }){
   return (
     <div className="dash">
       <div className="dash-status">
-        <span>Sven Finance <span style={{opacity:.55}}>// v56</span></span>
+        <span>Sven Finance <span style={{opacity:.55}}>// v57</span></span>
         <span className="dstat">
           <span>Lens {(OWNERS[lens] || 'Ours')}</span>
           <span>{plural(vAssets.length, 'position')}</span>
